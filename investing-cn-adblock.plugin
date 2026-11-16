@@ -1,5 +1,5 @@
-#!name=英为财情去广告 v11
-#!desc=[v11] 屏蔽英为财情(Investing.com) iOS App 内的 Google AdMob 广告、GA4/GTM 跟踪、Segment 与第一方/云端埋点、Google Ads 再营销与转化像素、Index Exchange 竞价、App 内促销横幅/Pro 推广 WebView、促销落地页域（landing.investing.com）、营销素材 CDN、行情页低估股票推广模块。空数据覆盖按接口类型区分：[Rule] 内置策略 REJECT-ARRAY（返回 []，数组型接口）与 REJECT-DICT（返回 {}，对象型接口）。v10 真机验证：黑五横幅等运营位素材打包在 App 安装包内（拦截 Firebase 下仍秒出），Firebase Remote Config 不能拦截（App 启动硬依赖，v10 曾致启动卡 6 秒+，v11 已回退）。需安装并信任 Loon CA 证书，并对 endpoints / pro.api 开启 MITM。规则经六轮 HAR 抓包 + 五轮真机反馈核实。
+#!name=英为财情去广告 v12
+#!desc=[v12] 屏蔽英为财情(Investing.com) iOS App 内的 Google AdMob 广告、GA4/GTM 跟踪、Segment 与第一方/云端埋点、Google Ads 再营销与转化像素、Index Exchange 竞价、App 内促销横幅/Pro 推广 WebView、促销落地页域（landing.investing.com）、营销素材 CDN。行情页「低估股票/焦点个股」推广模块的两条数据源（endpoints fair-value-table + pro.api FairValue）改为 REJECT(404)：真机验证返回空数据会让模块转入「InvestingPro 解锁」推销卡态，故改走错误态尝试让模块整体不渲染。v10 真机验证：运营横幅素材打包在 App 安装包内、Firebase Remote Config 不可拦截（App 启动硬依赖，已回退）。需安装并信任 Loon CA 证书，并对 endpoints / pro.api 开启 MITM。规则经六轮 HAR 抓包 + 六轮真机反馈核实。
 #!icon=https://static.investing.com/core/images/investing-logo.png
 #!author=WorkBuddy
 #!date=2026-11-16
@@ -16,7 +16,7 @@
 #    表现为「插件已装、广告仍在、抓包中也看不到广告请求」。
 # 3) 改动后完全杀死 Loon 与 App 再重开，使 App 回落 TCP/HTTPS。
 # 4) ★ 确认手机里跑的是这一版：Loon → 配置 → 插件，列表里应显示
-#    「英为财情去广告 v11」。若显示的名字没有 v9，说明手机加载的仍是旧文件。
+#    「英为财情去广告 v12」。若显示的名字没有 v9，说明手机加载的仍是旧文件。
 #    更新方式见文件末尾 [MITM] 之后的「版本核对与更新」说明。
 # ============================================================
 
@@ -167,26 +167,39 @@ DOMAIN-SUFFIX,app-ads-services.com,REJECT
 #   依据：Loon 官方规则策略表 —— REJECT-ARRAY: HTTP 200，响应体为空数组字符串。
 #     （-NO-DROP 变体文档存在，但 3.5.4(1014) 真机疑似不支持，禁用。）
 URL-REGEX,^https?:\/\/endpoints\.investing\.com\/content-mobile\/v2\/banner,REJECT-ARRAY
-# ★ v9 核心规则：行情页「焦点个股 / 低估股票」绿色推广条返回 200 + []
-#   第五轮 248 请求抓包定位：数据来自该接口（200 + 24KB JSON，symbol 全部为
-#   "********" 付费墙打码），本质是「订阅 Pro 才能看是哪只股票」的营销位。
-#   不影响真实行情/自选/图表（该路径仅服务这一个推广卡片）。
-URL-REGEX,^https?:\/\/endpoints\.investing\.com\/mobile-renderer\/v1\/fair-value-table\/undervalued,REJECT-ARRAY
-# ★ v8 起拦截：绿条的第二数据源（pro.api 兜底接口）
-#   第五轮抓包中 pro.api.investing.com/investing.finbox.FairValue/
-#   GetTopOvervaluedUndervalued 出现 8 次、全部 200 放行 —— 它与上面的
-#   mobile-renderer 接口返回同构数据（top over/undervalued 股票表）。
-#   v7 真机表现「绿条等了一会又出来」与「endpoints 版被拦空 → App 改用
-#   pro.api 版兜底渲染」的时间线吻合，故一并拦截。
-#   说明：pro.api.investing.com 已加入下方 [MITM]（URL-REGEX 需解密匹配）。
-#   ★ v10 修正：本条必须用 REJECT-DICT（返回 {}）而不是 REJECT-ARRAY（返回 []）！
-#     该接口响应体是 JSON **对象**：{"top_overvalued":{"fair_values":[...]},
-#     "top_undervalued":{...}}（content-type: application/json，POST，HTTP/2）。
-#     v8/v9 返回 [] 属于类型不匹配 → App 解析失败后重试，表现为绿条「延迟 5 秒
-#     才出现」。返回 {} 时空对象可正常解析，各字段取不到值 → 卡片不渲染。
-#   风险评估：该路径仅服务这一个推广卡片；若您订阅了 Pro 且 Pro 页面出现
-#   异常，注释掉本条并把 pro.api.investing.com 从 [MITM] 移除即可回退。
-URL-REGEX,^https?:\/\/pro\.api\.investing\.com\/investing\.finbox\.FairValue\/GetTopOvervaluedUndervalued,REJECT-DICT
+# ★ v12 核心规则：「焦点个股 / 低估股票」推广位的两条数据源改为 REJECT（404）
+#   ---- 为什么从「返回空数据」改成「返回 404」----
+#   v11 真机反馈：把两条数据源都清空（[] 与 {}）后，该位置**并没有消失**，
+#   而是换成了黄色的「InvestingPro 解锁 / AI 美股 Mid-Cap Movers +40%」推广卡。
+#   原响应实际结构（第五轮抓包核实）：
+#     endpoints .../fair-value-table/undervalued  → JSON **数组**，30 个元素，
+#       字段 instrument_id / symbol / name / fair_value_upside / analyst_* 等
+#       （symbol 全为 "********"，客户端按 Pro 权限打码）
+#   ★ 关键推论：这个 UI 位是一个原生模块，只有两种渲染态：
+#     · 拿到合法空数组 []  → 走「无数据/升级」态 → 渲染黄色 Pro 推广卡
+#     · 拿到 30 条数据      → 渲染 30 行打码的「低估股票」绿色列表
+#   所以「清空数据」不等于「移除模块」，反而触发了更显眼的推销卡。
+#   ---- 现在尝试的方案 ----
+#   返回 404（请求失败，非「合法的空」）→ 让模块的数据获取进入错误态而不是
+#   空态，期望 App 直接不创建该视图（无数据也不渲染推广卡）。
+#   若 404 后仍出现黄色卡 → 说明该卡由 App 内置逻辑无条件渲染，网络层到此为止；
+#   此时**建议回退为不拦截**（注释掉下面两行 + 从 [MITM] 移除 pro.api），
+#   因为「30 行打码列表」比「亮黄色推销卡」视觉侵入更小、且不诱导误点。
+#   ---- 备选写法（按需切换，只保留一条启用）----
+#     REJECT-ARRAY → 200 + []   已验证：渲染黄色 Pro 推广卡（不要用）
+#     REJECT-DICT  → 200 + {}   已验证：同上（对象接口用；同样会渲染推广卡）
+#     REJECT       → 404        当前方案：期望模块整体不渲染
+#   不影响真实行情/自选/图表（这两条路径仅服务该推广模块）。
+URL-REGEX,^https?:\/\/endpoints\.investing\.com\/mobile-renderer\/v1\/fair-value-table\/undervalued,REJECT
+# ★ 第二数据源：pro.api.investing.com 的 FairValue 兜底接口
+#   第五轮抓包中该接口 7×200（另有 2×0 客户端取消），响应体是 JSON **对象**：
+#   {"top_overvalued":{"fair_values":[...]},"top_undervalued":{...}}（POST，HTTP/2）。
+#   v8/v9 曾给它配 REJECT-ARRAY（[]）→ 类型不匹配 → App 静默重试 → 绿条「延迟 5 秒」
+#   才出现；v10 改 REJECT-DICT（{}）→ 不再延迟，但模块转入黄色推销卡态（v11 反馈）。
+#   v12 与上面一致改为 REJECT（404），走「错误态」而非「空态」。
+#   风险评估：该路径仅服务这一个推广模块；若您订阅了 Pro 且 Pro 页面出现异常，
+#   注释掉本条并把 pro.api.investing.com 从 [MITM] 移除即可回退。
+URL-REGEX,^https?:\/\/pro\.api\.investing\.com\/investing\.finbox\.FairValue\/GetTopOvervaluedUndervalued,REJECT
 # storage.googleapis.com /content-mobile-static-resources/banner*（首轮抓包命中 1 次，第二轮命中均为 404 拦截）
 #   横幅素材，如 banner-variant/Marketing - DFP Pro Campaigns/BF2026/Early-Bird_DFP_footer_BG.png
 #   须在 [MITM] hostname 中加入 storage.googleapis.com 才能解密匹配。
@@ -347,7 +360,7 @@ DOMAIN-SUFFIX,landing.investing.com,REJECT
 hostname=www.google.com,www.google.com.hk,play.googleapis.com,storage.googleapis.com,www.gstatic.cn,endpoints.investing.com,pro.api.investing.com,*.doubleclick.net,*.googlesyndication.com,*.googletagservices.com,*.adtrafficquality.google,*.2mdn.net,*.googleadservices.com,googleadservices-cn.com,adservice.google.com,imasdk.googleapis.com,static.googleadsserving.cn
 
 # ============================================================
-# 版本核对与更新（v11，2026-11-16）
+# 版本核对与更新（v12，2026-11-16）
 # ============================================================
 # 【为什么必须先核对版本】
 #   本文件是仓库里的「源文件」。Loon 手机端加载的是它自己的副本：
@@ -355,9 +368,9 @@ hostname=www.google.com,www.google.com.hk,play.googleapis.com,storage.googleapis
 #   - 用文件导入安装 → Loon 内存中已加载的是导入那一刻的旧内容
 #
 # 【30 秒核对】
-#   Loon → 底部「配置」→「插件」→ 找到本插件 → 看标题是否为「英为财情去广告 v11」
-#   · 有 v11 → 版本正确，继续看下面「v11 生效判据」
-#   · 没有 v11 → 版本是旧的，按下面任一方式更新后再测试
+#   Loon → 底部「配置」→「插件」→ 找到本插件 → 看标题是否为「英为财情去广告 v12」
+#   · 有 v12 → 版本正确，继续看下面「v12 生效判据」
+#   · 没有 v12 → 版本是旧的，按下面任一方式更新后再测试
 #
 # 【更新方式（三选一）】
 #   A. GitHub 订阅（推荐，长期）：把本文件提交到你的仓库
@@ -368,30 +381,42 @@ hostname=www.google.com,www.google.com.hk,play.googleapis.com,storage.googleapis
 #   C. 手动粘贴：Loon → 插件 → 右上角「+」→ 从文件/文本新建，粘贴全文。
 #   更新后：完全上滑杀死 Loon 和英为财情 App，再重开（必须，否则 App 仍用旧连接）。
 #
-# 【v11 生效判据（下次抓包时逐条对照）】
+# 【v12 生效判据（下次抓包时逐条对照）】
 #   1. endpoints.investing.com/content-mobile/v2/banner
 #      → 应是 200，响应体为 []（长度 2）
 #      （注意：本条即使生效也不影响黑五横幅，因为它本就不是横幅的数据源）
 #   2. endpoints.investing.com/mobile-renderer/v1/fair-value-table/undervalued
-#      → 应是 200 + []（长度 2）
+#      → v12 起应是 404（原 200 + 24KB 数组），用于让模块进入错误态
 #   3. pro.api.investing.com/investing.finbox.FairValue/GetTopOvervaluedUndervalued
-#      → 应是 200 + {}（长度 2，v10 由 [] 改为 {}，匹配对象类型）
+#      → v12 起应是 404（原 200 + 4.6KB 对象）
 #      若仍是 4KB 200 → pro.api 的 MITM 未生效（该域可能有证书固定，需回退该条）
 #   4. 其余业务接口（pd-instruments / watchlist / brokers / user-data-profile）
 #      应保持 200 不变，请求数不变 —— 若这些变成 404，说明 [MITM] 配错，立即回退。
+#
+# 【原「绿条」位置专项（v12 重定义）】
+#   ★ 用户 v11 反馈修正了此前的判断：不是「黑五横幅换成黄条」，而是
+#     **绿条所在的位置换成了黄色 InvestingPro 推广卡**（「AI 美股 Mid-Cap
+#     Movers 今年迄今 +40%，用 InvestingPro 解锁」）。
+#   ★ 由此确认：这个位置是**原生模块**，只有两种渲染态——
+#     拿到合法空数据（[] / {}）→ 渲染黄色 Pro 推销卡；
+#     拿到 30 条真实数据      → 渲染 30 行打码（symbol = ********）的股票列表。
+#     所以「清空数据」不等于「移除模块」，反而把推销卡逼了出来。
+#   v12 改为 REJECT(404)：让数据请求进入错误态而非合法空态，期望模块不渲染。
+#   若 404 后黄卡仍在 → 该卡由 App 内置逻辑无条件渲染，网络层无法移除；
+#   此时最佳选择是**不拦截**（30 行打码列表比亮黄色推销卡更不刺眼、不诱导误点）。
 #
 # 【绿条（焦点个股）专项：5 秒延迟的成因】
 #   v9 给 pro.api 配的是 REJECT-ARRAY（返回 []），但该接口响应是 JSON 对象
 #   {"top_overvalued":{...}}，类型不匹配 → App 解析失败 → 重试 → 约 5 秒后才
 #   落下结果（这就是「延迟 5 秒出来」）。v10 改为 REJECT-DICT（返回 {}），
 #   空对象可正常解析、字段取不到值 → 卡片不渲染，且不再触发重试延迟。
-#   若 v11 后绿条仍出现：说明还有第三个数据源，请在 Loon 请求记录里看绿条出现
-#   前 5 秒内 endpoints / pro.api 之外还有哪些 investing 域请求。
+#   若 v12 后该位置仍有内容：见上方「原绿条位置专项」——那是模块的固有渲染态，
+#   不是缺了什么数据源（两条数据源都已覆盖，抓包中不存在第三个源）。
 #
 # 【最快验证路径（无需导出 HAR，30 秒）】
 #   打开英为财情 → 等横幅出现 → Loon → 「请求记录/最近请求」→ 搜 "banner"：
 #   · 看到 200 且响应体是 []   → 规则生效，横幅来自 App 内置层
-#   · 看到 404                  → 装的不是 v11
+#   · 看到 404                  → 装的不是 v12
 #   · 看到 status 无响应/断开   → REJECT 升级断连
 #   · 搜不到 banner 请求        → 横幅数据不走网络（App 内置实锤）
 #
@@ -404,19 +429,20 @@ hostname=www.google.com,www.google.com.hk,play.googleapis.com,storage.googleapis
 #   3) 二次启动出现**新的**推广横幅（黄色 InvestingPro「Mid-Cap Movers +40%」）
 #      → 证实横幅来自 App 内置素材池随机轮换：拦截状态下重装，横幅内容还会变。
 #
-# 【v11 分支结论树】
+# 【v12 分支结论树】
 #   绿条消失（不再延迟）            → REJECT-DICT 类型修正生效 ✓
 #   绿条仍延迟 5 秒出现              → 存在第三数据源，需 Loon 请求记录定位
-#   banner 是 404                   → 手机里不是 v11（先核对版本）
+#   banner 是 404                   → 手机里不是 v12（先核对版本）
 #   banner 是 24KB 200              → MITM 对该域未生效（检查证书/总开关）
 #
-# 【v11 未覆盖项（已知限制，属 Loon 能力边界）—— 均为 App 内置素材，网络层无解】
+# 【v12 未覆盖项（已知限制，属 Loon 能力边界）—— 均为 App 内置素材，网络层无解】
 #   · 黑五横幅（IMG_0780/0782）：v10 拦截 Firebase + 删 App 重装后仍 1 秒秒出，
 #     素材打包在安装包内，实锤。
 #   · 黄色 InvestingPro 推广条（IMG_0786，「Mid-Cap Movers +40%」）：拦截状态下
 #     二次启动出现的「新」横幅，同属内置素材池轮换，实锤。
 #   · 全屏插屏广告（IMG_0779，CONTROLS 经纪商）：五轮抓包无任何广告网络请求，
 #     无对应响应体，判断同为内置素材 + 定时触发。
-#   · 行情页绿色「焦点个股」条若在 v11 后仍出现，用 Loon 请求记录定位第三数据源
-#     （这是唯一仍有网络拦截空间的项）。
+#   · 行情页「低估股票/焦点个股」位置：v12 改为 404 后若仍显示任何内容（黄卡或
+#     打码列表），说明该模块由 App 内置逻辑无条件渲染，网络层无法移除 —— 此时
+#     建议回退为不拦截（30 行打码列表比亮黄色推销卡更不刺眼、不诱导误点）。
 # ============================================================
