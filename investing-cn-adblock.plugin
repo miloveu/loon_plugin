@@ -25,14 +25,13 @@ DOMAIN-SUFFIX,casalemedia.com,REJECT
 DOMAIN-SUFFIX,indexww.com,REJECT
 DOMAIN,event,REJECT
 
-# ---- Facebook SDK 事件上报（如需 FB 登录/分享异常，删掉下面这行） ----
-DOMAIN-SUFFIX,ep2.facebook.com,REJECT
-
-# ---- 广告 SDK 配置 / 同意弹窗 / Firebase 远程配置 ----
+# ---- 广告 SDK 配置 ----
 DOMAIN-SUFFIX,app-ads-services.com,REJECT
-DOMAIN-SUFFIX,onetrust.io,REJECT
-# 若 App 出现功能异常，可删掉下面这行 Firebase 远程配置
-DOMAIN-SUFFIX,firebaseremoteconfig.googleapis.com,REJECT
+
+# !!! 保守版已移除以下三条（曾导致 App 启动卡住），如需再加回请逐条测试：
+# DOMAIN-SUFFIX,ep2.facebook.com,REJECT
+# DOMAIN-SUFFIX,onetrust.io,REJECT
+# DOMAIN-SUFFIX,firebaseremoteconfig.googleapis.com,REJECT
 
 # ---- App 自带的运营促销横幅（Markets / Watchlist 页，拦截后可能留白） ----
 URL-REGEX,^https?:\/\/endpoints\.investing\.com\/content-mobile\/v2\/banner,REJECT
