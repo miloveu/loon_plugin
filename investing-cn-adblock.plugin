@@ -1,5 +1,5 @@
-#!name=英为财情去广告 v9
-#!desc=[v9] 屏蔽英为财情(Investing.com) iOS App 内的 Google AdMob 广告、GA4/GTM 跟踪、Segment 与第一方/云端埋点、Google Ads 再营销与转化像素（/ccm、/rmkt、/pagead）、Index Exchange 竞价、App 内促销横幅/Pro 推广 WebView、促销落地页域（landing.investing.com）、营销素材 CDN（inv-marketing-assets）、行情页低估股票推广模块（fair-value-table/undervalued 及 pro.api 兜底源）。空数组覆盖用 [Rule] 内置策略 REJECT-ARRAY（v7 实证生效；v8 的 -NO-DROP 变体在 Loon 3.5.4(1014) 上疑似不被识别致规则失效，已回退）。需安装并信任 Loon CA 证书，并对 endpoints / pro.api 开启 MITM。规则经 2026-11-16 六轮 HAR 抓包 + 三轮真机反馈核实。
+#!name=英为财情去广告 v10
+#!desc=[v10] 屏蔽英为财情(Investing.com) iOS App 内的 Google AdMob 广告、GA4/GTM 跟踪、Segment 与第一方/云端埋点、Google Ads 再营销与转化像素、Index Exchange 竞价、App 内促销横幅/Pro 推广 WebView、促销落地页域（landing.investing.com）、营销素材 CDN、行情页低估股票推广模块，v10 起并拦截 Firebase Remote Config（黑五横幅秒出的真正数据源）。空数据覆盖按接口类型区分：[Rule] 内置策略 REJECT-ARRAY（返回 []，用于数组型接口）与 REJECT-DICT（返回 {}，用于对象型接口）。需安装并信任 Loon CA 证书，并对 endpoints / pro.api 开启 MITM。规则经六轮 HAR 抓包 + 四轮真机反馈核实。
 #!icon=https://static.investing.com/core/images/investing-logo.png
 #!author=WorkBuddy
 #!date=2026-11-16
@@ -16,7 +16,7 @@
 #    表现为「插件已装、广告仍在、抓包中也看不到广告请求」。
 # 3) 改动后完全杀死 Loon 与 App 再重开，使 App 回落 TCP/HTTPS。
 # 4) ★ 确认手机里跑的是这一版：Loon → 配置 → 插件，列表里应显示
-#    「英为财情去广告 v9」。若显示的名字没有 v9，说明手机加载的仍是旧文件。
+#    「英为财情去广告 v10」。若显示的名字没有 v9，说明手机加载的仍是旧文件。
 #    更新方式见文件末尾 [MITM] 之后的「版本核对与更新」说明。
 # ============================================================
 
@@ -179,9 +179,14 @@ URL-REGEX,^https?:\/\/endpoints\.investing\.com\/mobile-renderer\/v1\/fair-value
 #   v7 真机表现「绿条等了一会又出来」与「endpoints 版被拦空 → App 改用
 #   pro.api 版兜底渲染」的时间线吻合，故一并拦截。
 #   说明：pro.api.investing.com 已加入下方 [MITM]（URL-REGEX 需解密匹配）。
+#   ★ v10 修正：本条必须用 REJECT-DICT（返回 {}）而不是 REJECT-ARRAY（返回 []）！
+#     该接口响应体是 JSON **对象**：{"top_overvalued":{"fair_values":[...]},
+#     "top_undervalued":{...}}（content-type: application/json，POST，HTTP/2）。
+#     v8/v9 返回 [] 属于类型不匹配 → App 解析失败后重试，表现为绿条「延迟 5 秒
+#     才出现」。返回 {} 时空对象可正常解析，各字段取不到值 → 卡片不渲染。
 #   风险评估：该路径仅服务这一个推广卡片；若您订阅了 Pro 且 Pro 页面出现
 #   异常，注释掉本条并把 pro.api.investing.com 从 [MITM] 移除即可回退。
-URL-REGEX,^https?:\/\/pro\.api\.investing\.com\/investing\.finbox\.FairValue\/GetTopOvervaluedUndervalued,REJECT-ARRAY
+URL-REGEX,^https?:\/\/pro\.api\.investing\.com\/investing\.finbox\.FairValue\/GetTopOvervaluedUndervalued,REJECT-DICT
 # storage.googleapis.com /content-mobile-static-resources/banner*（首轮抓包命中 1 次，第二轮命中均为 404 拦截）
 #   横幅素材，如 banner-variant/Marketing - DFP Pro Campaigns/BF2026/Early-Bird_DFP_footer_BG.png
 #   须在 [MITM] hostname 中加入 storage.googleapis.com 才能解密匹配。
@@ -225,9 +230,19 @@ DOMAIN-SUFFIX,landing.investing.com,REJECT
 # mobile-data.onetrust.io / onetrust.io
 #   OneTrust 隐私同意管理。拦截可能引发合规/弹窗异常问题，故保持注释。
 # DOMAIN-SUFFIX,onetrust.io,REJECT
-# firebaseremoteconfig.googleapis.com
-#   Firebase 远程配置，拦截可能影响 App 功能开关下发，故保持注释。
-# DOMAIN-SUFFIX,firebaseremoteconfig.googleapis.com,REJECT
+# firebaseremoteconfig.googleapis.com —— ★ v10 启用（"黑五横幅秒出"的最大嫌疑源）
+#   第五轮抓包命中 2 次，响应体 {"state":"NO_CHANGE","templateVersion":"6186"}。
+#   NO_CHANGE = App **本地已缓存**一份远程配置模板，本次只是校验版本。
+#   这条证据链完整解释了黑五横幅的全部异常表现：
+#     · banner 接口 404 / [] 都没用 → 横幅数据根本不来自 banner 接口
+#     · 「秒出」→ 读本地缓存的配置模板，不等网络
+#     · 删 App 重装后仍在 → 重装后首次联网会重新拉这份模板（596 之前的多轮抓包
+#       中该域均有请求），拉回来照样含活动配置
+#   拦截效果：App 拿不到新模板，只能退回安装包内置的默认配置（通常无活动位）。
+#   ⚠ 副作用风险：该域同时承载功能开关（feature flags）。若拦截后 App 出现
+#     启动卡住、页面空白等异常，请注释掉本条并重装 App 回退（这是本插件唯一
+#     一条带有功能风险的规则，其余规则均只影响广告/推广）。
+DOMAIN-SUFFIX,firebaseremoteconfig.googleapis.com,REJECT
 # 全局 QUIC 兜底（可选，激进）：
 #   拒绝所有 UDP 443 (HTTP/3) 流量，迫使全部 App 回落 TCP/HTTPS，规则 100% 生效。
 #   副作用：所有 App 的 HTTP/3 传输层降级为 HTTP/2（功能不受影响，连接建立略慢）。
@@ -267,7 +282,7 @@ DOMAIN-SUFFIX,landing.investing.com,REJECT
 #                                         已加入 [MITM] 但仅按路径 REJECT，不影响搜索）
 
 # ============================================================
-# 返回空数组（200 + []）—— v9 核心机制
+# 返回空数据（200 + [] / {}）—— v10 核心机制
 # ============================================================
 # 【为什么返回 200 + [] 而不是 REJECT(404)】
 #   实测（第四轮 HAR，banner 8 次全部 404 = 拦截确实生效，但黑五横幅仍在显示）：
@@ -289,8 +304,10 @@ DOMAIN-SUFFIX,landing.investing.com,REJECT
 #
 #   参考策略族（同一机制，后续可按需替换）：
 #     REJECT        → 404 空 body        （本次问题的根源，勿再用于这三个接口）
-#     REJECT-DICT   → 200 + {}           （若 App 期望对象结构用这个）
-#     REJECT-ARRAY  → 200 + []           （当前使用，v7 实证生效）
+#     REJECT-ARRAY  → 200 + []           （用于**数组型**响应：banner、fair-value-table）
+#     REJECT-DICT   → 200 + {}           （用于**对象型**响应：pro.api FairValue）
+#   ★ 选型原则：先看接口原响应的 JSON 顶层类型，数组给 []，对象给 {}。类型不匹配
+#     时 App 解析失败会静默重试，表现为「延迟几秒才出结果」而非直接失败（v9 教训）。
 #
 # 【依赖】三条规则的域 endpoints / pro.api.investing.com 已在下方 [MITM] hostname 中，
 #   且已真机验证 endpoints 无证书固定（pinning）：同域非目标路径请求 48×200 正常。
@@ -312,6 +329,8 @@ DOMAIN-SUFFIX,landing.investing.com,REJECT
 #    同域非 banner 业务请求 48×200 正常放行。解密仅为让 [Rule] 的
 #    REJECT-ARRAY 规则能按 URL 匹配生效，业务 API 响应不做任何修改。
 # 1b) pro.api.investing.com —— v8 起加入（绿条第二数据源 FairValue 兜底接口需要）。
+#     注意：该接口为 POST + HTTP/2 + application/json（非 gRPC），URL-REGEX 可正常
+#     匹配；若实测拦截无效（仍返回 4KB 200），说明该域有证书固定，注释该条回退。
 #    仅按路径拦 GetTopOvervaluedUndervalued；若订阅 Pro 后 Pro 页面异常，
 #    注释掉该路径规则并把本域从 hostname 移除即可回退。
 # 2) www.google.com / www.google.com.hk / play.googleapis.com / storage.googleapis.com /
@@ -328,7 +347,7 @@ DOMAIN-SUFFIX,landing.investing.com,REJECT
 hostname=www.google.com,www.google.com.hk,play.googleapis.com,storage.googleapis.com,www.gstatic.cn,endpoints.investing.com,pro.api.investing.com,*.doubleclick.net,*.googlesyndication.com,*.googletagservices.com,*.adtrafficquality.google,*.2mdn.net,*.googleadservices.com,googleadservices-cn.com,adservice.google.com,imasdk.googleapis.com,static.googleadsserving.cn
 
 # ============================================================
-# 版本核对与更新（v9，2026-11-16）
+# 版本核对与更新（v10，2026-11-16）
 # ============================================================
 # 【为什么必须先核对版本】
 #   本文件是仓库里的「源文件」。Loon 手机端加载的是它自己的副本：
@@ -336,9 +355,9 @@ hostname=www.google.com,www.google.com.hk,play.googleapis.com,storage.googleapis
 #   - 用文件导入安装 → Loon 内存中已加载的是导入那一刻的旧内容
 #
 # 【30 秒核对】
-#   Loon → 底部「配置」→「插件」→ 找到本插件 → 看标题是否为「英为财情去广告 v9」
-#   · 有 v9 → 版本正确，继续看下面「v9 生效判据」
-#   · 没有 v9 → 版本是旧的，按下面任一方式更新后再测试
+#   Loon → 底部「配置」→「插件」→ 找到本插件 → 看标题是否为「英为财情去广告 v10」
+#   · 有 v10 → 版本正确，继续看下面「v10 生效判据」
+#   · 没有 v10 → 版本是旧的，按下面任一方式更新后再测试
 #
 # 【更新方式（三选一）】
 #   A. GitHub 订阅（推荐，长期）：把本文件提交到你的仓库
@@ -349,40 +368,62 @@ hostname=www.google.com,www.google.com.hk,play.googleapis.com,storage.googleapis
 #   C. 手动粘贴：Loon → 插件 → 右上角「+」→ 从文件/文本新建，粘贴全文。
 #   更新后：完全上滑杀死 Loon 和英为财情 App，再重开（必须，否则 App 仍用旧连接）。
 #
-# 【v9 生效判据（下次抓包时逐条对照）】
+# 【v10 生效判据（下次抓包时逐条对照）】
 #   1. endpoints.investing.com/content-mobile/v2/banner
-#      → 应是 200，响应体为 []（长度 2），且多次请求稳定 200（不再断连）
+#      → 应是 200，响应体为 []（长度 2）
+#      （注意：本条即使生效也不影响黑五横幅，因为它本就不是横幅的数据源）
 #   2. endpoints.investing.com/mobile-renderer/v1/fair-value-table/undervalued
 #      → 应是 200 + []（长度 2）
 #   3. pro.api.investing.com/investing.finbox.FairValue/GetTopOvervaluedUndervalued
-#      → 应是 200 + []（长度 2）；若仍是 4KB 200 → pro.api 的 MITM 未生效
-#   4. 其余业务接口（pd-instruments / watchlist / brokers / user-data-profile）
+#      → 应是 200 + {}（长度 2，v10 由 [] 改为 {}，匹配对象类型）
+#      若仍是 4KB 200 → pro.api 的 MITM 未生效（该域可能有证书固定，需回退该条）
+#   4. firebaseremoteconfig.googleapis.com → 应直接断开/无响应（整域 REJECT）
+#   5. 其余业务接口（pd-instruments / watchlist / brokers / user-data-profile）
 #      应保持 200 不变，请求数不变 —— 若这些变成 404，说明 [MITM] 配错，立即回退。
+#
+# 【v10 关键动作（黑五横幅这条必须做，否则改了也看不到效果）】
+#   拦截 Firebase 只能阻止「下次拉取」，拦不掉已经存在手机里的配置模板。
+#   验证顺序：① 更新插件到 v10 并确认版本 → ② 删除英为财情 App →
+#   ③ 重新安装 → ④ 首次启动（此时 Firebase 被拦，拉不到配置模板）→
+#   ⑤ 观察黑五横幅是否出现。
+#   若重装后仍出现 → 配置内置在安装包内，网络层到此为止（这是能力边界，不是漏拦）。
+#
+# 【绿条（焦点个股）专项：5 秒延迟的成因】
+#   v9 给 pro.api 配的是 REJECT-ARRAY（返回 []），但该接口响应是 JSON 对象
+#   {"top_overvalued":{...}}，类型不匹配 → App 解析失败 → 重试 → 约 5 秒后才
+#   落下结果（这就是「延迟 5 秒出来」）。v10 改为 REJECT-DICT（返回 {}），
+#   空对象可正常解析、字段取不到值 → 卡片不渲染，且不再触发重试延迟。
+#   若 v10 后绿条仍出现：说明还有第三个数据源，请在 Loon 请求记录里看绿条出现
+#   前 5 秒内 endpoints / pro.api 之外还有哪些 investing 域请求。
 #
 # 【最快验证路径（无需导出 HAR，30 秒）】
 #   打开英为财情 → 等横幅出现 → Loon → 「请求记录/最近请求」→ 搜 "banner"：
-#   · 看到 200 且响应体是 []   → 规则生效，横幅来自 App 内置/缓存层
-#   · 看到 404                  → 装的不是 v9
-#   · 看到 status 无响应/断开   → REJECT 升级断连（v7 悬案真因）
-#   · 搜不到 banner 请求        → 横幅根本没走网络 = App 内置，网络层无解
+#   · 看到 200 且响应体是 []   → 规则生效，横幅来自配置模板/内置层
+#   · 看到 404                  → 装的不是 v10
+#   · 看到 status 无响应/断开   → REJECT 升级断连
+#   · 搜不到 banner 请求        → 横幅数据不走 banner 接口（符合 Firebase 判断）
 #
-# 【v9 分支结论树（拿到新抓包后按此走）】
-#   三个接口都 200+[]，横幅/绿条消失          → 完成 ✓
-#   三个接口都 200+[]，但「等一会」又出来     → App 在超时后回退到 App 包内置的
-#                                              素材（非网络数据），网络层无解；
-#                                              可尝试删除 App 重装后首启不联网
-#   banner 是 404                            → 手机里不是 v9（先核对版本）
-#   banner 是 24KB 200                       → MITM 对该域未生效（检查证书/总开关）
-#   banner 请求「status 0 / 无响应」多次出现  → REJECT 升级断连被触发（v7 悬案的
-#                                              真因）；换 Script http-response 方案
+# 【v10 分支结论树】
+#   绿条消失、黑五重装后消失        → 完成 ✓
+#   绿条消失、黑五重装后仍秒出       → 配置内置安装包，网络层无解（能力边界）
+#   绿条仍延迟 5 秒出现              → 存在第三数据源，需 Loon 请求记录定位
+#   banner 是 404                   → 手机里不是 v10（先核对版本）
+#   banner 是 24KB 200              → MITM 对该域未生效（检查证书/总开关）
+#   App 启动卡住/页面空白            → Firebase 拦截触发副作用，注释该条并重装回退
 #
-# 【v9 未覆盖项（已知限制，属 Loon 能力边界）】
+# 【v10 未覆盖项（已知限制，属 Loon 能力边界）】
 #   · 全屏插屏广告（截图 IMG_0779，CONTROLS 经纪商）：第五轮 248 请求抓包中
 #     无任何 AdMob / Facebook Audience Network 广告请求，也无对应响应体。
 #     判断是 App 内置营销素材 + 定时触发，或素材早已落盘。Loon 只能在网络层
 #     拦截，对「不联网就已存在的素材」无效。
 #     若希望继续攻这一项，需要在插屏弹出的**同一时刻**抓包（打开 App 后持续录
 #     30 秒以上，等插屏出现再停止），否则抓不到证据。
-#   · 黑五横幅（IMG_0780/0782）：若 banner 已返回 [] 且确认后续无任何 banner
-#     类请求，但横幅仍出现 → 该素材内置在 App 包内，网络层无法处理。
+#   · 黑五横幅（IMG_0780/0782）—— v10 已定位并处理：
+#     现象「秒出」（不等网络）→ 数据不在 banner 接口（404 与 [] 两版都无效），
+#     而在 Firebase Remote Config 下发的活动配置模板里（该域返回 NO_CHANGE，
+#     证明 App 本地持有模板）。v10 已启用该域拦截。
+#     ★ 必须配合「删除 App 重装」才可能生效：本地模板是在安装后首次联网时拉取的，
+#     不重装则新规则只能阻止下次更新、拦不掉已落盘的那份。
+#     若重装后（拦截状态下）横幅仍出现 → 说明配置内置在安装包内，网络层到此为止。
+#   · 插屏广告若在拦截 Firebase 后消失，说明同属配置驱动，无需再单独处理。
 # ============================================================
