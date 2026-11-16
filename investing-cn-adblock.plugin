@@ -37,6 +37,9 @@ DOMAIN-SUFFIX,app-ads-services.com,REJECT
 URL-REGEX,^https?:\/\/endpoints\.investing\.com\/content-mobile\/v2\/banner,REJECT
 URL-REGEX,^https?:\/\/storage\.googleapis\.com\/content-mobile-static-resources\/banner,REJECT
 
+# ---- 自营推广 WebView（"更多"菜单页促销横幅等，第二次抓包定位） ----
+DOMAIN-SUFFIX,mobile-web-promo.investing.com,REJECT
+
 [Script]
 
 [MITM]
