@@ -146,6 +146,18 @@ DOMAIN-SUFFIX,mobile-web-promo.investing.com,REJECT
 DOMAIN-SUFFIX,landing.investing.com,REJECT
 
 # ============================================================
+# 第三次抓包复核（206 请求，2026-11-16 21:12，Loon 导出）
+# ============================================================
+# 广告/埋点域放行数 = 0，广告拦截已收敛，本版无需新增规则：
+#   - 整域拦截生效：landing / mobile-web-promo / data / datainternal / segment.io /
+#     cloudflareinsights / googleadservices-cn 均 0 次出现
+#   - 路径拦截生效：www.google.com(.hk) 7 次全部 404、www.gstatic.cn 4 次全部 404、
+#     endpoints banner 10 次全部 404
+#   - 业务域零误伤：endpoints 非 banner 63 次 200、iappapi 37 次、cdn.investing.com
+#     22 次（币种图标）、streaming WebSocket 101 正常
+#   - 仅剩可选规则族放行（规则已注释，属预期）：ep2.facebook.com 8、firebase 1、onetrust 1
+
+# ============================================================
 # 可选规则（历史反馈存在副作用，默认注释，如需启用请逐条测试）
 # ============================================================
 # ep2.facebook.com（抓包命中 12 次）
@@ -177,6 +189,8 @@ DOMAIN-SUFFIX,landing.investing.com,REJECT
 # streaming.forexpros.com              —— WebSocket 实时行情
 # content-media.investing.com          —— 新闻图片
 # i-invdn-com.investing.com            —— 国旗图标
+# cdn.investing.com                    —— 内容素材 CDN（加密货币币种图标等，
+#                                         第三次抓包 22 次 crypto-logos 正常，禁止拦截）
 # brokers.education.investing.com      —— 教育内容域（第二次抓包 3 次正常，放行）
 # controls-group.com                   —— 与 App 无关的外部企业站（用户同期浏览，
 #                                         第二次抓包 71 次），禁止拦截
