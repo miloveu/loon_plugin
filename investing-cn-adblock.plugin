@@ -1,5 +1,5 @@
-#!name=英为财情去广告
-#!desc=屏蔽英为财情(Investing.com) iOS App 内的 Google AdMob 广告、GA4/GTM 跟踪、Segment 与第一方/云端埋点、Google Ads 再营销与转化像素（/ccm、/rmkt、/pagead）、Index Exchange 竞价、App 内促销横幅/Pro 推广 WebView、促销落地页域（landing.investing.com）及营销素材 CDN（inv-marketing-assets）。规则主体无需 MITM；Google 广告路径拦截（www.google.com、play.googleapis.com、storage.googleapis.com 等）需安装并信任 Loon CA 证书；App 内促销横幅拦截需对 endpoints.investing.com 开启 MITM（已真机验证无证书固定，业务请求正常）。核心规则经 2026-11-16 两轮 HAR 抓包核实（224 / 472 请求），另含防御性广告域规则。
+#!name=英为财情去广告 v6
+#!desc=[v6] 屏蔽英为财情(Investing.com) iOS App 内的 Google AdMob 广告、GA4/GTM 跟踪、Segment 与第一方/云端埋点、Google Ads 再营销与转化像素（/ccm、/rmkt、/pagead）、Index Exchange 竞价、App 内促销横幅/Pro 推广 WebView、促销落地页域（landing.investing.com）、营销素材 CDN（inv-marketing-assets）、行情页低估股票推广模块（fair-value-table/undervalued）。v6 起 App 内促销位改用 reject-array 返回合法空数组（替代 404），使 App 以空数据覆盖本地缓存。需安装并信任 Loon CA 证书，并对 endpoints.investing.com 开启 MITM（已真机验证无证书固定）。规则经 2026-11-16 五轮 HAR 抓包核实（224/472/206/248 请求）。
 #!icon=https://static.investing.com/core/images/investing-logo.png
 #!author=WorkBuddy
 #!date=2026-11-16
@@ -15,6 +15,10 @@
 #    未开启时 App 的 HTTP/3 (QUIC/UDP 443) 流量不经过规则匹配，
 #    表现为「插件已装、广告仍在、抓包中也看不到广告请求」。
 # 3) 改动后完全杀死 Loon 与 App 再重开，使 App 回落 TCP/HTTPS。
+# 4) ★ 确认手机里跑的是这一版：Loon → 配置 → 插件，列表里应显示
+#    「英为财情去广告 v6」。若显示的名字没有 v6，说明手机加载的仍是旧文件
+#    （旧版把 banner 拦成 404，App 会用缓存继续渲染横幅，改多少次都没用）。
+#    更新方式见文件末尾 [MITM] 之后的「版本核对与更新」说明。
 # ============================================================
 
 [Rule]
@@ -142,11 +146,17 @@ DOMAIN-SUFFIX,app-ads-services.com,REJECT
 #   第四轮 8 次，place_name = Markets / Watchlist / Side Menu / Ideas / News）
 #   响应体已验证为促销横幅 JSON 数组（如 id=924 黑五横幅：action_url 跳转 pro_lp，
 #   light/dark_image_url 指向 storage 的 banner-variant/Early_sale.png）。
-#   ★ 2026-11-16 第五轮：本条 REJECT 已移除，改用 [Rewrite] 的 reject-array（返回 200 + []）。
-#     原因：返回 404 时 App 认为「请求失败」，继续用本地缓存的旧 banner JSON + 已缓存图片
-#     渲染横幅（实测第四轮抓包 banner 全部 404，黑五横幅仍显示）；返回合法空数组 [] 时
-#     App 会以空列表覆盖缓存，横幅才会真正消失。规则位置见文件末尾 [Rewrite] 段。
+#   ★ v6：本条 [Rule] 已移除，改由文件末尾 [Rewrite] 段的 reject-array 处理
+#     （返回 200 + 合法空数组 []）。原因：返回 404 时 App 认为「请求失败」，
+#     继续用本地缓存的旧 banner JSON + 已缓存图片渲染横幅（第四轮抓包 banner
+#     8 次全部 404，黑五横幅仍在显示，铁证）。返回 [] 时 App 才会以空列表
+#     覆盖缓存，横幅真正消失。
+# --- 已废弃写法（保留作记录，勿启用）---
 # URL-REGEX,^https?:\/\/endpoints\.investing\.com\/content-mobile\/v2\/banner,REJECT
+# endpoints.investing.com /mobile-renderer/v1/fair-value-table/undervalued
+#   行情页「低估股票」绿色推广条的数据源（第五轮抓包 2 次 200，24KB JSON，
+#   symbol 全为 "********" 付费墙打码）。原本无任何规则覆盖，是 v6 新增的拦截点，
+#   同样走 [Rewrite] 的 reject-array（返回 []），对应截图里那条绿色「焦点个股」推广条。
 # storage.googleapis.com /content-mobile-static-resources/banner*（首轮抓包命中 1 次，第二轮命中均为 404 拦截）
 #   横幅素材，如 banner-variant/Marketing - DFP Pro Campaigns/BF2026/Early-Bird_DFP_footer_BG.png
 #   须在 [MITM] hostname 中加入 storage.googleapis.com 才能解密匹配。
@@ -229,22 +239,41 @@ DOMAIN-SUFFIX,landing.investing.com,REJECT
 # www.google.com / www.google.com.hk   —— 通用搜索域（仅拦上述四个广告路径，
 #                                         已加入 [MITM] 但仅按路径 REJECT，不影响搜索）
 
-[Script]
-
 # ============================================================
-# 响应体重写（Rewrite）
-# 用途：让 App「主动清空」促销横幅缓存，而不是用 404 触发它沿用旧缓存。
-# 原理：banner 接口原响应为 JSON 数组（如 [{"id":924,...黑五横幅...}]）。
-#   - 返回 404 → App 视为请求失败，继续用本地缓存渲染横幅（实测第四轮抓包
-#     8 次 banner 全部 404，黑五横幅仍在显示 = 缓存渲染，铁证）。
-#   - 返回 200 + []（reject_array）→ App 视为「当前无横幅」，以空数组覆盖缓存，
-#     横幅随之消失（已缓存的横幅图片不再被引用）。
-# 使用 Loon 3.5.1+ 新版语法，request 阶段直接返回，请求不发往服务器。
-# 依赖：endpoints.investing.com 已在 [MITM] hostname 中（Rewrite 需解密才生效）。
-# 旧版 Loon（3.5.1 之前）可改用旧语法：^https?:\/\/endpoints\.investing\.com\/content-mobile\/v2\/banner reject-array
+# 响应体重写（Rewrite）—— v6 核心改动
+# ============================================================
+# 【为什么用 reject-array 而不是 REJECT(404)】
+#   实测（第四轮 HAR，banner 8 次全部 404 = 拦截确实生效，但黑五横幅仍在显示）：
+#   App 把 404 视为「请求失败」，于是沿用本地缓存的上一次 banner JSON + 已缓存图片
+#   继续渲染。拦截越干净，缓存里的横幅反而越"长寿"。
+#   改成返回 HTTP 200 + 合法空数组 [] 后，App 视为「服务端当前无活动横幅」，
+#   会用空数据覆盖缓存 —— 这是让横幅真正消失的唯一方式。
+#
+# 【为什么用 `reject-array` 旧语法而不是 `request if ... then reject_array(200)`】
+#   Loon 的 Rewrite 段对两种写法都支持，但 `request if ${url} ~= // then xxx`
+#   属于较新语法，3.5.x 部分版本解析失败后整条规则被静默丢弃（表现为「规则像不存在」）。
+#   `^正则 动作` 是 Loon 全版本兼容的经典写法，无解析风险。
+#
+# 【语法】<URL 正则> <动作>
+#   reject-array = 直接返回 HTTP 200，Content-Type: application/json，body 为 []
+#   请求不会发往服务器（省流量、不会触发上游上报）
+#
+# 【依赖】两条规则的目标域 endpoints.investing.com 已在下方 [MITM] hostname 中，
+#   且已真机验证该域无证书固定（pinning）：同域非目标路径请求 48×200 正常。
+#
+# 【旧版 Loon（<3.5.1）】reject-array 语法同样可用，无需改动。
 # ============================================================
 [Rewrite]
-request if ${url} ~= /^https:\/\/endpoints\.investing\.com\/content-mobile\/v2\/banner/ then reject_array(200)
+# App 内促销横幅（place_name = Markets / Watchlist / Side Menu / Ideas / News）
+# 原响应：[{"id":924,"action_url":"...screen=pro_lp","light_image_url":"...Black Friday 2026/Early_sale.png"}]
+# 返回 [] 后：所有 banner 位变空，黑五/早鸟等运营横幅不再渲染。
+^https?:\/\/endpoints\.investing\.com\/content-mobile\/v2\/banner reject-array
+
+# 行情页「焦点个股 / 低估股票」绿色推广条（点击跳 com.investing.app://...screen=undervalued）
+# 第五轮 248 请求抓包定位：本模块数据来自该接口，200 + 24KB JSON，其中
+# symbol 全部为 "********"（付费墙打码），本质是「订阅 Pro 才能看是哪只股票」的营销位。
+# 返回 [] 后：该推广卡片无数据，行情页不再插入绿色条。不影响真实行情/自选/图表。
+^https?:\/\/endpoints\.investing\.com\/mobile-renderer\/v1\/fair-value-table\/undervalued reject-array
 
 [MITM]
 # 解密面说明：
@@ -263,3 +292,46 @@ request if ${url} ~= /^https:\/\/endpoints\.investing\.com\/content-mobile\/v2\/
 #   - 需在 Loon「配置 → MitM」同时开启「QUIC 回退保护」与「MitM over HTTP/2」。
 # 需在 Loon 中安装并信任 CA 证书（Loon → 设置 → 证书管理）后本段才生效。
 hostname=www.google.com,www.google.com.hk,play.googleapis.com,storage.googleapis.com,www.gstatic.cn,endpoints.investing.com,*.doubleclick.net,*.googlesyndication.com,*.googletagservices.com,*.adtrafficquality.google,*.2mdn.net,*.googleadservices.com,googleadservices-cn.com,adservice.google.com,imasdk.googleapis.com,static.googleadsserving.cn
+
+# ============================================================
+# 版本核对与更新（v6，2026-11-16）
+# ============================================================
+# 【为什么必须先核对版本】
+#   本文件是仓库里的「源文件」。Loon 手机端加载的是它自己的副本：
+#   - 用 URL 订阅安装 → Loon 读的是 GitHub 上的文件，本地这份改了不会自动同步
+#   - 用文件导入安装 → Loon 内存中已加载的是导入那一刻的旧内容
+#   如果手机里跑的是旧版（banner 仍然 REJECT 成 404），那么无论把下面规则
+#   改多少次，效果都不会变 —— 这是前几轮「改了但没变化」的唯一合理解释。
+#
+# 【30 秒核对】
+#   Loon → 底部「配置」→「插件」→ 找到本插件 → 看标题是否为「英为财情去广告 v6」
+#   · 有 v6 → 版本正确，继续看下面「v6 生效判据」
+#   · 没有 v6 → 版本是旧的，按下面任一方式更新后再测试
+#
+# 【更新方式（三选一）】
+#   A. GitHub 订阅（推荐，长期）：把本文件提交到你的仓库
+#      https://github.com/miloveu/loon_plugin 覆盖同名文件，然后在 Loon
+#      插件页下拉刷新 / 点插件右侧「更新」。
+#   B. 本地文件：AirDrop / iCloud 把本 .plugin 发到 iPhone → 用 Loon 打开
+#      → 导入并覆盖同名插件。
+#   C. 手动粘贴：Loon → 插件 → 右上角「+」→ 从文件/文本新建，粘贴全文。
+#   更新后：完全上滑杀死 Loon 和英为财情 App，再重开（必须，否则 App 仍用旧连接）。
+#
+# 【v6 生效判据（下次抓包时逐条对照）】
+#   1. endpoints.investing.com/content-mobile/v2/banner
+#      旧版：8 次全是 404      → v6 应变成 200，响应体为 []（长度 2）
+#   2. endpoints.investing.com/mobile-renderer/v1/fair-value-table/undervalued
+#      旧版：2 次 200 + 24KB   → v6 应是 200 + []（长度 2）
+#   3. 其余业务接口（pd-instruments / watchlist / brokers / user-data-profile）
+#      应保持 200 不变，请求数不变 —— 若这些变成 404，说明 [MITM] 配错，立即回退。
+#
+# 【v6 未覆盖项（已知限制，属 Loon 能力边界）】
+#   · 全屏插屏广告（截图 IMG_0779，CONTROLS 经纪商）：第五轮 248 请求抓包中
+#     无任何 AdMob / Facebook Audience Network 广告请求，也无对应响应体。
+#     判断是 App 内置营销素材 + 定时触发，或素材早已落盘。Loon 只能在网络层
+#     拦截，对「不联网就已存在的素材」无效。
+#     若希望继续攻这一项，需要在插屏弹出的**同一时刻**抓包（打开 App 后持续录
+#     30 秒以上，等插屏出现再停止），否则抓不到证据。
+#   · 黑五横幅（IMG_0780）：若 banner 已返回 [] 但横幅仍在，说明该素材被内置在
+#     App 包内（重装后依旧存在也吻合这一判断），网络层无法处理。
+# ============================================================
