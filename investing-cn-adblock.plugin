@@ -138,14 +138,15 @@ DOMAIN-SUFFIX,app-ads-services.com,REJECT
 # ============================================================
 # App 内促销横幅 / 自营推广
 # ============================================================
-# endpoints.investing.com /content-mobile/v2/banner（首轮抓包命中 21 次，第二轮命中 20 次全部 404 拦截）
-#   响应体已验证为促销横幅 JSON（action_url 跳转 pro_lp，
-#   analytics_event_name=click_on_investing_pro_hook）。
-#   注意：Markets / Watchlist 页拦截后可能留白。
-#   ★ 已真机验证无证书固定（pinning）：endpoints.investing.com 加入 [MITM] 后，
-#     同域非 banner 业务请求 48×200 正常（行情/自选/新闻完好），banner 请求全部
-#     404 拦截成功。MITM 已启用，本条实际生效。
-URL-REGEX,^https?:\/\/endpoints\.investing\.com\/content-mobile\/v2\/banner,REJECT
+# endpoints.investing.com /content-mobile/v2/banner（首轮抓包命中 21 次，第二轮 20 次、
+#   第四轮 8 次，place_name = Markets / Watchlist / Side Menu / Ideas / News）
+#   响应体已验证为促销横幅 JSON 数组（如 id=924 黑五横幅：action_url 跳转 pro_lp，
+#   light/dark_image_url 指向 storage 的 banner-variant/Early_sale.png）。
+#   ★ 2026-11-16 第五轮：本条 REJECT 已移除，改用 [Rewrite] 的 reject-array（返回 200 + []）。
+#     原因：返回 404 时 App 认为「请求失败」，继续用本地缓存的旧 banner JSON + 已缓存图片
+#     渲染横幅（实测第四轮抓包 banner 全部 404，黑五横幅仍显示）；返回合法空数组 [] 时
+#     App 会以空列表覆盖缓存，横幅才会真正消失。规则位置见文件末尾 [Rewrite] 段。
+# URL-REGEX,^https?:\/\/endpoints\.investing\.com\/content-mobile\/v2\/banner,REJECT
 # storage.googleapis.com /content-mobile-static-resources/banner*（首轮抓包命中 1 次，第二轮命中均为 404 拦截）
 #   横幅素材，如 banner-variant/Marketing - DFP Pro Campaigns/BF2026/Early-Bird_DFP_footer_BG.png
 #   须在 [MITM] hostname 中加入 storage.googleapis.com 才能解密匹配。
@@ -230,11 +231,28 @@ DOMAIN-SUFFIX,landing.investing.com,REJECT
 
 [Script]
 
+# ============================================================
+# 响应体重写（Rewrite）
+# 用途：让 App「主动清空」促销横幅缓存，而不是用 404 触发它沿用旧缓存。
+# 原理：banner 接口原响应为 JSON 数组（如 [{"id":924,...黑五横幅...}]）。
+#   - 返回 404 → App 视为请求失败，继续用本地缓存渲染横幅（实测第四轮抓包
+#     8 次 banner 全部 404，黑五横幅仍在显示 = 缓存渲染，铁证）。
+#   - 返回 200 + []（reject_array）→ App 视为「当前无横幅」，以空数组覆盖缓存，
+#     横幅随之消失（已缓存的横幅图片不再被引用）。
+# 使用 Loon 3.5.1+ 新版语法，request 阶段直接返回，请求不发往服务器。
+# 依赖：endpoints.investing.com 已在 [MITM] hostname 中（Rewrite 需解密才生效）。
+# 旧版 Loon（3.5.1 之前）可改用旧语法：^https?:\/\/endpoints\.investing\.com\/content-mobile\/v2\/banner reject-array
+# ============================================================
+[Rewrite]
+request if ${url} ~= /^https:\/\/endpoints\.investing\.com\/content-mobile\/v2\/banner/ then reject_array(200)
+
 [MITM]
-# 仅为「按 URL 路径拦截 HTTPS 广告请求」而解密，共 6 个低风险广告/日志/静态素材域。
-# endpoints.investing.com 已真机验证无证书固定（pinning）：加入后同域非 banner
-# 业务请求 48×200 正常放行，banner 请求全部 404 拦截成功，故正式加入以启用
-# /content-mobile/v2/banner 路径拦截（仅解密按路径 REJECT，不触碰业务 API 响应）。
+# 解密面说明：
+# 1) endpoints.investing.com —— 唯一业务域解密项，已真机验证无证书固定（pinning）：
+#    同域非 banner 业务请求 48×200 正常放行，故仅供 [Rewrite] 将 banner 响应
+#    重写为空数组（返回 200 + []），业务 API 响应不做任何修改。
+# 2) www.google.com / www.google.com.hk / play.googleapis.com / storage.googleapis.com /
+#    www.gstatic.cn —— 按 URL 路径拦广告像素、日志、横幅素材。
 # ★ 2026-11-16 第四轮追加（QUIC 回退触发组）：
 #   Loon 的「QUIC 回退保护」只对 [MITM] hostname 列表内的域名生效（当 QUIC 的
 #   SNI 命中 hostname 列表时拒绝转发，迫使 App 回落 TCP/HTTPS）。此前 AdMob
