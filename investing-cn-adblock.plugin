@@ -1,0 +1,44 @@
+#!name = 英为财情去广告
+#!desc = 屏蔽英为财情(Investing.com) iOS App 内的 Google AdMob 广告、Index Exchange 竞价、Facebook 事件上报及 App 内促销横幅。纯 REJECT 规则，无需 MITM。
+#!icon = https://static.investing.com/core/images/investing-logo.png
+#!author = WorkBuddy
+#!date = 2026-11-16
+#!tag = 去广告
+
+[General]
+
+# --------------------------------------------------
+# [Rule] 广告与追踪拦截
+# --------------------------------------------------
+[Rule]
+
+# ---- Google AdMob / DoubleClick 广告素材与组件 ----
+DOMAIN-SUFFIX,2mdn.net,REJECT
+DOMAIN-SUFFIX,googletagservices.com,REJECT
+DOMAIN-SUFFIX,adtrafficquality.google,REJECT
+URL-REGEX,^https?:\/\/static\.googleadsserving\.cn,REJECT
+# gstatic.cn 只拦广告 SDK 用的 /mysidia/ 路径，不影响其他 Google 中国资源
+URL-REGEX,^https?:\/\/www\.gstatic\.cn\/mysidia,REJECT
+
+# ---- Index Exchange / Casale 竞价与广告事件上报 ----
+DOMAIN-SUFFIX,casalemedia.com,REJECT
+DOMAIN-SUFFIX,indexww.com,REJECT
+DOMAIN,event,REJECT
+
+# ---- Facebook SDK 事件上报（如需 FB 登录/分享异常，删掉下面这行） ----
+DOMAIN-SUFFIX,ep2.facebook.com,REJECT
+
+# ---- 广告 SDK 配置 / 同意弹窗 / Firebase 远程配置 ----
+DOMAIN-SUFFIX,app-ads-services.com,REJECT
+DOMAIN-SUFFIX,onetrust.io,REJECT
+# 若 App 出现功能异常，可删掉下面这行 Firebase 远程配置
+DOMAIN-SUFFIX,firebaseremoteconfig.googleapis.com,REJECT
+
+# ---- App 自带的运营促销横幅（Markets / Watchlist 页，拦截后可能留白） ----
+URL-REGEX,^https?:\/\/endpoints\.investing\.com\/content-mobile\/v2\/banner,REJECT
+URL-REGEX,^https?:\/\/storage\.googleapis\.com\/content-mobile-static-resources\/banner,REJECT
+
+[Script]
+
+[MITM]
+hostname =
