@@ -1,5 +1,5 @@
 #!name=英为财情去广告
-#!desc=屏蔽英为财情(Investing.com) iOS App 内的 Google AdMob 广告、GA4/GTM 跟踪、Segment 与第一方埋点、Google Ads 再营销像素、Index Exchange 竞价及 App 内促销横幅/Pro 推广 WebView。规则主体无需 MITM；Google 广告路径拦截（www.google.com、play.googleapis.com、storage.googleapis.com 等）需安装并信任 Loon CA 证书；App 内促销横幅拦截需额外对 endpoints.investing.com 开启 MITM（该域存在证书固定风险，默认未启用）。核心规则经 2026-11-16 共 224 个请求的 HAR 抓包核实，另含防御性广告域规则。
+#!desc=屏蔽英为财情(Investing.com) iOS App 内的 Google AdMob 广告、GA4/GTM 跟踪、Segment 与第一方/云端埋点、Google Ads 再营销与转化像素（/ccm、/rmkt、/pagead）、Index Exchange 竞价、App 内促销横幅/Pro 推广 WebView、促销落地页域（landing.investing.com）及营销素材 CDN（inv-marketing-assets）。规则主体无需 MITM；Google 广告路径拦截（www.google.com、play.googleapis.com、storage.googleapis.com 等）需安装并信任 Loon CA 证书；App 内促销横幅拦截需对 endpoints.investing.com 开启 MITM（已真机验证无证书固定，业务请求正常）。核心规则经 2026-11-16 两轮 HAR 抓包核实（224 / 472 请求），另含防御性广告域规则。
 #!icon=https://static.investing.com/core/images/investing-logo.png
 #!author=WorkBuddy
 #!date=2026-11-16
@@ -22,7 +22,8 @@ DOMAIN-SUFFIX,data.investing.com,REJECT
 
 # ============================================================
 # Google AdMob / DoubleClick 广告素材与组件
-# 以下 7 条 Google AdMob / 广告素材相关域本次抓包未出现，保留作防御性拦截
+# 以下 Google AdMob / 广告素材相关域中，仅 googleadservices-cn.com 在第二次抓包
+# 出现（1 次，见下方注释）；其余各域均未出现，保留作防御性拦截
 # （段末 www.gstatic.cn 为 1 条 URL-REGEX，同样 0 命中，见该处说明）。
 # ============================================================
 # 2mdn.net —— 本次抓包未出现，保留作防御性拦截（Google 广告素材 CDN）
@@ -37,6 +38,10 @@ DOMAIN-SUFFIX,doubleclick.net,REJECT
 DOMAIN-SUFFIX,googlesyndication.com,REJECT
 # googleadservices.com —— 本次抓包未出现，保留作防御性拦截（Google Ads 转化跟踪）
 DOMAIN-SUFFIX,googleadservices.com,REJECT
+# googleadservices-cn.com —— googleadservices.com 的中国变体
+#   第二次抓包（472 请求）命中 1 次 /pagead/aclk 302 跳转（Google Ads 广告点击
+#   跳转域，跳向 /aclk?ai=... 竞价点击回传）。整域仅服务于广告点击，可安全 REJECT。
+DOMAIN-SUFFIX,googleadservices-cn.com,REJECT
 # static.googleadsserving.cn（中国区 Google 广告素材 CDN，用途单一，整域可安全拦截）
 #   本次抓包未出现（0 次），保留作防御性拦截（历史抓包命中）。
 #   本条用 DOMAIN-SUFFIX 整域拦截，无需 MITM，未安装 CA 证书时同样生效。
@@ -57,6 +62,19 @@ DOMAIN-SUFFIX,analytics.google.com,REJECT
 # 另：www.googletagmanager.com /gtm.js（抓包命中 2 次）已被上方 googletagmanager.com 规则覆盖。
 
 # ============================================================
+# 第三方云端埋点（Segment 云端 / Cloudflare Web Insights）
+# 第一方 Segment 埋点域 datainternal.investing.com 已在上方整域拦截。
+# ============================================================
+# segment.io（第二次抓包命中 1 次：api.segment.io /v1/m 200）
+#   Segment 云端埋点端点（第一方域被拦后的兜底上报路径）。整域仅服务于
+#   埋点数据转发，可安全 REJECT。
+DOMAIN-SUFFIX,segment.io,REJECT
+# cloudflareinsights.com（第二次抓包命中 1 次：static.cloudflareinsights.com /beacon.min.js 200）
+#   Cloudflare Web Insights 访问统计 beacon，由促销 WebView 页面加载。
+#   拦截仅影响其他网站的 CF 访问统计，无任何功能损失。
+DOMAIN-SUFFIX,cloudflareinsights.com,REJECT
+
+# ============================================================
 # Google Ads 转化 / 再营销像素（仅拦广告路径，不整域拦截）
 # 说明：以下均为 HTTPS 请求，须在 [MITM] hostname 中加入
 #   www.google.com, www.google.com.hk, play.googleapis.com
@@ -65,10 +83,14 @@ DOMAIN-SUFFIX,analytics.google.com,REJECT
 # www.google.com / www.google.com.hk（各 4 次抓包命中）
 #   路径：/ccm/collect、/rmkt/collect/<id>、/ads/ga-audiences
 #   均为 Google Ads 转化与再营销像素；www.google.com 为通用搜索域，禁止整域拦截，
-#   故用 URL-REGEX 精确匹配以下三个路径。
+#   故用 URL-REGEX 精确匹配各广告路径（首轮 3 条，第二次抓包补入 /pagead/ 共 4 条）。
 URL-REGEX,^https?:\/\/www\.google\.com(\.hk)?\/ccm\/collect,REJECT
 URL-REGEX,^https?:\/\/www\.google\.com(\.hk)?\/rmkt\/collect,REJECT
 URL-REGEX,^https?:\/\/www\.google\.com(\.hk)?\/ads\/ga-audiences,REJECT
+# www.google.com /pagead/（第二次抓包命中 10 次：3×200 + 6×302，server: cafe）
+#   路径 /pagead/1p-conversion/16670544354/ 为 Google Ads 一方转化像素，
+#   由促销落地页/广告 SDK 触发。与上述三条同域同性质，补入路径正则。
+URL-REGEX,^https?:\/\/www\.google\.com(\.hk)?\/pagead\/,REJECT
 # play.googleapis.com /log（抓包命中 1 次）
 #   Google Play 日志上报，由促销 WebView 内 gtag 触发。
 URL-REGEX,^https?:\/\/play\.googleapis\.com\/log,REJECT
@@ -94,23 +116,34 @@ DOMAIN-SUFFIX,app-ads-services.com,REJECT
 # ============================================================
 # App 内促销横幅 / 自营推广
 # ============================================================
-# endpoints.investing.com /content-mobile/v2/banner（抓包命中 21 次）
+# endpoints.investing.com /content-mobile/v2/banner（首轮抓包命中 21 次，第二轮命中 20 次全部 404 拦截）
 #   响应体已验证为促销横幅 JSON（action_url 跳转 pro_lp，
 #   analytics_event_name=click_on_investing_pro_hook）。
 #   注意：Markets / Watchlist 页拦截后可能留白。
-#   ⚠️ 此规则需在 [MITM] hostname 中加入 endpoints.investing.com 才生效；
-#      该域是第一方业务 API，若 App 有证书固定（pinning）会导致行情/自选/新闻空白，
-#      请先真机测试再启用（默认未启用 MITM，故本条当前实际不拦截）。
+#   ★ 已真机验证无证书固定（pinning）：endpoints.investing.com 加入 [MITM] 后，
+#     同域非 banner 业务请求 48×200 正常（行情/自选/新闻完好），banner 请求全部
+#     404 拦截成功。MITM 已启用，本条实际生效。
 URL-REGEX,^https?:\/\/endpoints\.investing\.com\/content-mobile\/v2\/banner,REJECT
-# storage.googleapis.com /content-mobile-static-resources/banner*（抓包命中 1 次）
+# storage.googleapis.com /content-mobile-static-resources/banner*（首轮抓包命中 1 次，第二轮命中均为 404 拦截）
 #   横幅素材，如 banner-variant/Marketing - DFP Pro Campaigns/BF2026/Early-Bird_DFP_footer_BG.png
 #   须在 [MITM] hostname 中加入 storage.googleapis.com 才能解密匹配。
 URL-REGEX,^https?:\/\/storage\.googleapis\.com\/content-mobile-static-resources\/banner,REJECT
-# mobile-web-promo.investing.com（抓包命中 28 次）
+# storage.googleapis.com /inv-marketing-assets/*（第二次抓包命中 55 次营销素材：
+#   42×200 + 5×206 视频分段 + 1×304，如 Cn Propicks Mobile.mp4、证言图、winners SVG）
+#   为促销落地页（landing.investing.com）加载的营销素材。storage.googleapis.com 已在
+#   [MITM] hostname 中，安装并信任 CA 证书即生效。
+URL-REGEX,^https?:\/\/storage\.googleapis\.com\/inv-marketing-assets\/,REJECT
+# mobile-web-promo.investing.com（首轮抓包命中 28 次，第二次抓包 0 次 = 整域拦截生效）
 #   自营 Pro 推广 WebView：/promo/ 返回促销 HTML（内含 GTM），/gcode/* 为
 #   server-side GTM 转发，/cdn-cgi/rum 与 /cdn-cgi/challenge-platform 为 Cloudflare 组件。
 #   整域仅服务于推广，可安全 REJECT。
 DOMAIN-SUFFIX,mobile-web-promo.investing.com,REJECT
+# landing.investing.com（第二次抓包命中 64 次，全部 200 放行 = "广告仍在"的主体）
+#   mobile-web-promo.investing.com 被整域拦截后，App 点击"升级 Pro"等促销入口时
+#   回退加载的新促销落地页（LP）域：路径全部为 /mobile_html/prod/app-landing/...
+#   （InvestingPro Pricing / ProPicks / EBBF 促销页），referer = mobile-web-promo.investing.com。
+#   拦截后果：点击 App 内促销入口时落地页加载失败（有意行为）。
+DOMAIN-SUFFIX,landing.investing.com,REJECT
 
 # ============================================================
 # 可选规则（历史反馈存在副作用，默认注释，如需启用请逐条测试）
@@ -132,7 +165,8 @@ DOMAIN-SUFFIX,mobile-web-promo.investing.com,REJECT
 # endpoints.investing.com（除 /content-mobile/v2/banner 外）：
 #   /pd-instruments/*（行情）、/watchlist/*（自选）、/translation/*、
 #   /users/v1/user-data-profile、/brokers/*、/mobile-renderer/*、/instruments/*
-#   ★ 该域不在 [MITM] hostname 中，业务 API 全程不解密、不被触碰（规避 pinning 风险）。
+#   ★ 已真机验证无证书固定：该域已加入 [MITM] 仅解密以按路径拦截 banner，
+#     其余业务请求 48×200 正常放行（见文件末尾 [MITM] 段说明）。
 # iappapi.investing.com：
 #   /get_screen.php、/login_api.php、/portfolio_api.php、/alerts_api.php、
 #   /ios_apns_update.php、/user_api.php、/ios_register_app.php
@@ -143,14 +177,23 @@ DOMAIN-SUFFIX,mobile-web-promo.investing.com,REJECT
 # streaming.forexpros.com              —— WebSocket 实时行情
 # content-media.investing.com          —— 新闻图片
 # i-invdn-com.investing.com            —— 国旗图标
-# www.google.com / www.google.com.hk   —— 通用搜索域（仅拦上述三个广告路径，
+# brokers.education.investing.com      —— 教育内容域（第二次抓包 3 次正常，放行）
+# controls-group.com                   —— 与 App 无关的外部企业站（用户同期浏览，
+#                                         第二次抓包 71 次），禁止拦截
+# cdnjs.cloudflare.com / code.jquery.com / fonts.googleapis.com / fonts.gstatic.com
+#                                      —— 通用公共库/字体 CDN，误伤面大，放行
+# www.gstatic.com/recaptcha            —— 验证码组件，误伤面大，放行
+# api.raindrop.io / wetype.weixin.qq.com / sequoia.cdn-apple.com —— 无关/正常，放行
+# www.google.com / www.google.com.hk   —— 通用搜索域（仅拦上述四个广告路径，
 #                                         已加入 [MITM] 但仅按路径 REJECT，不影响搜索）
 
 [Script]
 
 [MITM]
-# 仅为「按 URL 路径拦截 HTTPS 广告请求」而解密，共 5 个低风险广告/日志/静态素材域，
-# 不包含任何 investing.com 业务 API（endpoints.investing.com 未加入，规避证书固定风险）。
+# 仅为「按 URL 路径拦截 HTTPS 广告请求」而解密，共 6 个低风险广告/日志/静态素材域。
+# endpoints.investing.com 已真机验证无证书固定（pinning）：加入后同域非 banner
+# 业务请求 48×200 正常放行，banner 请求全部 404 拦截成功，故正式加入以启用
+# /content-mobile/v2/banner 路径拦截（仅解密按路径 REJECT，不触碰业务 API 响应）。
 # 注：static.googleadsserving.cn 已改为 DOMAIN-SUFFIX 整域拦截，无需解密，故不在此列。
 # 需在 Loon 中安装并信任 CA 证书（Loon → 设置 → 证书管理）后本段才生效。
-hostname=www.google.com,www.google.com.hk,play.googleapis.com,storage.googleapis.com,www.gstatic.cn
+hostname=www.google.com,www.google.com.hk,play.googleapis.com,storage.googleapis.com,www.gstatic.cn,endpoints.investing.com
