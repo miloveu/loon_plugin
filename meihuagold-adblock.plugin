@@ -1,5 +1,5 @@
-#!name=黄金形态通去广告 v1
-#!desc=屏蔽黄金形态通(meihuagold.com)内的自营推广 banner（ad/ad.json + 广告图）、数聚派 shujupie 第三方埋点、阿里 aplus 统计脚本与第一方 appanalytics 上报。行情接口(api/goldapi/goldhub.meihuagold.com)与极验 geetest 验证码全部放行，不影响任何行情功能。规则基于 2026-11-19 真机 HAR 抓包（74 条请求）核实。
+#!name=黄金形态通去广告 v2
+#!desc=屏蔽黄金形态通(meihuagold.com)内的自营推广 banner。v1 真机验证：REJECT-DICT 返回 {} 后 App 不隐藏 banner，而是沿用本地缓存的旧广告配置+已缓存图片渲染（7 次 ad.json 全部返回 {}，banner 仍在，且无任何广告图/落地页请求）。v2 改用脚本把 ad.json 响应伪造为合法配置 {"link":{"display":"no"}}，让 App 以「服务端关闭广告」覆盖缓存。第三方埋点(shujupie/alibaba aplus)与第一方统计拦截不变。行情接口与极验验证码全部放行。
 #!icon=https://img.apuse3c.com/source/www/template/fav.ico
 #!author=miloveu
 #!date=2026-11-19
@@ -7,41 +7,25 @@
 
 # ============================================================
 # 安装说明
-# 1) URL-REGEX 规则需要解密 HTTPS 才能匹配 URL 路径：
-#    需先安装并信任 Loon CA 证书（Loon → 设置 → 证书管理），
-#    且 [MITM] hostname 中的域名保持开启 HTTPS 解密。
-# 2) 若 Ad 域为 HTTP/3 (QUIC) 流量导致拦截不生效：
-#    Loon → 配置 → MitM → 开启「QUIC 回退保护」。
-# 3) 改动后完全杀死 Loon 与 App 再重开。
+# 1) 需安装并信任 Loon CA 证书（脚本与 URL-REGEX 均依赖 HTTPS 解密）。
+# 2) 建议开启 Loon → 配置 → MitM →「QUIC 回退保护」。
+# 3) ★ v2 关键步骤：更新插件后必须清一次 App 缓存（App 设置内「清除缓存」，
+#    或完整删除 App 重装），否则已缓存的 banner 图会继续显示（缓存续命）。
+# 4) 改动后完全杀死 Loon 与 App 再重开。
 # ============================================================
 
 [Rule]
 
-# ── 自营推广 banner（本次抓包确认的广告本体）─────────────────
-# www.meihuagold.com/ad/ad.json（抓包命中 2 次）
-#   响应体为 JSON 对象 {"link":{"url":"https://lp.lqbnhy.com/cn/zt/...","display":"yes",
-#   "image":{"src":".../ad/5-20.jpg"}}} —— App 的推广 banner 配置源。
-#   ★ 顶层是对象，按类型选型用 REJECT-DICT（返回 200 + {}）：
-#     404 会让 App 沿用本地缓存的旧广告配置（参考 investing-cn 插件 v9 教训），
-#     空对象才是让 App 以「无广告」覆盖缓存的正确空态。
-#   若你的 Loon 版本不识别 REJECT-DICT（表现为广告仍在），把下面这条改成
-#   REJECT 并清一次 App 数据/缓存后再观察。
-URL-REGEX,^https?:\/\/www\.meihuagold\.com\/ad\/ad\.json,REJECT-DICT
-# /ad/ 路径下的广告素材图（如 /ad/5-20.jpg）与未来新增广告图，统一拦截
+# ── 广告素材图 / 落地页兜底拦截 ──────────────────────────────
+# /ad/ 路径下的广告图（如 /ad/5-20.jpg）与未来新增广告素材，统一拦截
 URL-REGEX,^https?:\/\/www\.meihuagold\.com\/ad\/,REJECT
 
-# ── 第三方埋点 / 统计 ────────────────────────────────────────
-# umini.shujupie.com（抓包命中 13 次：/web_logs POST 上报 ×6 + OPTIONS 预检 ×6 + /eg.js 配置）
-#   数聚派 U-Mini 前端埋点 SDK，纯数据上报用途，整域可安全 REJECT。
+# ── 第三方埋点 / 统计（v1 已真机验证可安全拦截）──────────────
+# umini.shujupie.com —— 数聚派 U-Mini 前端埋点 SDK，纯数据上报，整域拦截
 DOMAIN-SUFFIX,shujupie.com,REJECT
-# d.alicdn.com/alilog/mlog/aplus/203467608.js（抓包命中 1 次）
-#   阿里 aplus 前端统计脚本。d.alicdn.com 是共享静态 CDN，
-#   只拦 /alilog 统计路径，不整域拦截，避免误伤其他静态资源。
+# d.alicdn.com/alilog —— 阿里 aplus 前端统计脚本（共享 CDN，仅拦统计路径）
 URL-REGEX,^https?:\/\/d\.alicdn\.com\/alilog,REJECT
-
-# ── 第一方统计 ───────────────────────────────────────────────
-# appanalytics.meihuagold.com（抓包命中 2 次：/v1/ping）
-#   App 自有统计上报域，与行情数据无关，整域可安全 REJECT。
+# appanalytics.meihuagold.com —— App 自有统计上报域（/v1/ping）
 DOMAIN,appanalytics.meihuagold.com,REJECT
 
 # ── 明确放行（勿拦截，列于此作提醒）─────────────────────────
@@ -50,10 +34,21 @@ DOMAIN,appanalytics.meihuagold.com,REJECT
 # www.meihuagold.com/run/flash.json —— 快讯内容，非广告
 # www.todayusstock.com —— 美股市场日历数据
 
+[Script]
+# 广告配置伪造：把 ad.json 响应体替换为 {"link":{"url":"","display":"no","image":null}}
+# 原理：v1 返回 {} 时 App 视为「解析不到有效配置」→ 沿用本地缓存继续渲染。
+# v2 返回一份合法但 display=no 的配置，App 会将其作为服务端最新配置覆盖缓存。
+# 若真机验证 display=no 不被识别，可尝试把 body 改为 null 或空串（见下方备选注释）。
+http-response ^https?:\/\/www\.meihuagold\.com\/ad\/ad\.json script-path=javascript:$done({body:JSON.stringify({link:{url:"",display:"no",image:null}})}), requires-body=true, tag=广告配置关闭
+
+# 备选（若 display=no 无效，逐个换试，改完务必清缓存重开）：
+# http-response ^https?:\/\/www\.meihuagold\.com\/ad\/ad\.json script-path=javascript:$done({body:"null"}), requires-body=true, tag=广告配置关闭
+# http-response ^https?:\/\/www\.meihuagold\.com\/ad\/ad\.json script-path=javascript:$done({body:""}), requires-body=true, tag=广告配置关闭
+
 [MITM]
-# 仅解密按 URL 路径匹配所需的最小域名集：
-#   www.meihuagold.com —— ad/ad.json 与 /ad/ 广告图路径规则依赖（同域的
-#     /run/flash.json 等业务请求只解密不改写，无功能影响）
-#   d.alicdn.com —— /alilog 统计路径规则依赖（共享 CDN，一般无证书固定；
-#     若解密后出现静态资源异常，删除本域并接受该统计脚本放行即可回退）
+# 仅解密按 URL 路径匹配 / 脚本所需的最小域名集：
+#   www.meihuagold.com —— ad.json 脚本改写与 /ad/ 图片拦截依赖
+#     （同域 /run/flash.json 等业务请求只解密不修改，无功能影响）
+#   d.alicdn.com —— /alilog 统计路径规则依赖（若解密后静态资源异常，
+#     删除本域回退即可，仅影响该统计脚本放行）
 hostname=www.meihuagold.com,d.alicdn.com
