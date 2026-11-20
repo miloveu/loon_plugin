@@ -4,21 +4,20 @@
 #!openUrl = https://www.clxp.net.cn/
 
 # ─────────────────────────────────────────────
-# 使用前请完成两步：
-# 1. 把本插件和 forum-signin.js 上传到 GitHub/Gitee 等
-#    获得 raw 直链，并把下方两处 REPLACE-WITH-YOUR-HOST
-#    替换成你的 raw 目录地址（保持 /forum-signin.js 后缀不变）
-# 2. 安装插件后：Loon 开启 → Safari 登录两个论坛各一次（抓 Cookie）
+# 已按仓库 miloveu/loon_plugin (main 分支) 填好脚本地址。
+# 使用步骤：
+# 1. 把本插件文件和 forum-signin.js 一起上传到该仓库根目录
+# 2. Loon 开启 → Safari 登录两个论坛各一次（抓 Cookie）
 # ─────────────────────────────────────────────
 
 [Script]
 # Cookie 抓取：两个论坛通用，登录/浏览时自动保存登录态（forum-signin.js 的 http-request 身份）
-cookie-capture = type=http-request, pattern=^https?://(www\.)?(583go\.com|clxp\.net\.cn)/, script-path=https://github.com/miloveu/loon_plugin/blob/main/forum-signin.js, requires-body=false, timeout=10, enabled=true
+cookie-capture = type=http-request, pattern=^https?://(www\.)?(583go\.com|clxp\.net\.cn)/, script-path=https://raw.githubusercontent.com/miloveu/loon_plugin/main/forum-signin.js, requires-body=false, timeout=10, enabled=true
 
 # 每日定时登录（每天 09:20 执行，可自行修改 cron 表达式）（forum-signin.js 的 cron 身份）
-daily-checkin = type=cron, cron="20 9 * * *", script-path=https://github.com/miloveu/loon_plugin/blob/main/forum-signin.js, timeout=120, enabled=true
+daily-checkin = type=cron, cron="20 9 * * *", script-path=https://raw.githubusercontent.com/miloveu/loon_plugin/main/forum-signin.js, timeout=120, enabled=true
 
-# MITM：clxp 为 HTTPS，读取其请求头 Cookie 需要解密；583go 为 HTTP 不受影响
-# 若未安装 Loon 根证书，请到 Loon → 配置 → 证书 安装并信任
+# MITM：两个站都要解密（Safari 会把 583go 的 http 自动升级为 https）
+# 前提：Loon → 配置 → 证书 已生成并安装，且 iOS 设置里已信任该证书
 [MITM]
-hostname = www.clxp.net.cn
+hostname = www.583go.com, www.clxp.net.cn, 583go.com, clxp.net.cn
