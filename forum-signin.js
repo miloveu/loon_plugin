@@ -40,6 +40,15 @@ function captureCookie() {
   const raw = headers["Cookie"] || headers["cookie"];
   const url = $request.url || "";
 
+  // 调试通知（v3）：确认新版脚本已生效，只在首页/登录页触发
+  if (/forum\.php|member\.php/.test(url)) {
+    $notification.post(
+      "Loon 调试 v3：脚本已触发",
+      "Cookie 登录态: " + (raw && /auth=/.test(raw) && /saltkey=/.test(raw) ? "✅" : raw ? "未登录" : "无"),
+      url.slice(0, 80)
+    );
+  }
+
   if (!raw) {
     console.log("请求头无 Cookie @ " + url);
     return;
@@ -196,6 +205,11 @@ async function main() {
 if (typeof $request === "undefined" || $request === null) {
   main();           // cron 身份
 } else {
-  captureCookie();  // http-request 身份
-  $done({});        // 注意：必须传空对象表示"保持请求不变"；无参会直接断开连接导致网站打不开
+  // http-request 身份：无论发生什么都必须 $done({}) 放行请求
+  try {
+    captureCookie();
+  } catch (e) {
+    console.log("captureCookie 异常: " + e);
+  }
+  $done({});        // 空对象 = 保持请求不变继续转发；无参会直接断开连接导致网站打不开
 }
