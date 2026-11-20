@@ -194,8 +194,8 @@ async function main() {
 // ─────────────────── 入口：按调用身份分发 ───────────────────
 
 if (typeof $request === "undefined" || $request === null) {
-  main();      // cron 身份
+  main();           // cron 身份
 } else {
   captureCookie();  // http-request 身份
-  $done();
+  $done({});        // 注意：必须传空对象表示"保持请求不变"；无参会直接断开连接导致网站打不开
 }
