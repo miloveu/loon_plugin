@@ -131,12 +131,23 @@ async function doSite(site) {
   // 1. 访问论坛首页 —— 相当于每天登录一次
   const homeBody = await httpGet(site.home, cookie);
 
-  // Discuz 登录态特征：页面上存在退出登录链接
-  const loggedIn =
-    /mod=logging&action=logout/.test(homeBody) ||
-    (/formhash=/.test(homeBody) && /space-uid-\d+/.test(homeBody));
+  // Discuz 登录态特征：页面上存在退出登录链接（兼容手机版模板）
+  const hasLogout = /mod=logging&action=logout|logging&action=logout|退出/.test(homeBody);
+  const hasHash = /formhash=/.test(homeBody);
+  const hasUid = /space-uid-\d+|uid=\d+&|member_center|个人中心/.test(homeBody);
+  const loggedIn = hasLogout || (hasHash && hasUid);
   if (!loggedIn) {
-    return "❌ Cookie 已失效（来源: " + resolved.from + "），请在 Safari 重新登录该网站";
+    // 诊断信息：帮助定位登录态检测问题（确认无误后可删除）
+    const strip = homeBody.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ");
+    return (
+      "❌ 未检测到登录态（来源: " + resolved.from + "）\n" +
+      "[诊断] len=" + homeBody.length +
+      " logout=" + hasLogout +
+      " formhash=" + hasHash +
+      " uid=" + hasUid +
+      " cookieLen=" + cookie.length +
+      "\n[片段] " + strip.slice(0, 150)
+    );
   }
 
   const hashMatch = homeBody.match(/formhash=([a-zA-Z0-9]+)/);
