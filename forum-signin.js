@@ -40,15 +40,6 @@ function captureCookie() {
   const raw = headers["Cookie"] || headers["cookie"];
   const url = $request.url || "";
 
-  // 调试通知（v3）：确认新版脚本已生效，只在首页/登录页触发
-  if (/forum\.php|member\.php/.test(url)) {
-    $notification.post(
-      "Loon 调试 v3：脚本已触发",
-      "Cookie 登录态: " + (raw && /auth=/.test(raw) && /saltkey=/.test(raw) ? "✅" : raw ? "未登录" : "无"),
-      url.slice(0, 80)
-    );
-  }
-
   if (!raw) {
     console.log("请求头无 Cookie @ " + url);
     return;
@@ -141,16 +132,9 @@ async function doSite(site) {
   const isMobilePage = /手机版|mobile=/.test(homeBody);
   const loggedIn = hasLogout || (hasHash && hasUid) || (hasUid && isMobilePage);
   if (!loggedIn) {
-    // 诊断信息：帮助定位登录态检测问题（确认无误后可删除）
-    const strip = homeBody.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ");
     return (
-      "❌ 未检测到登录态（来源: " + resolved.from + "）\n" +
-      "[诊断] len=" + homeBody.length +
-      " logout=" + hasLogout +
-      " formhash=" + hasHash +
-      " uid=" + hasUid +
-      " cookieLen=" + cookie.length +
-      "\n[片段] " + strip.slice(0, 150)
+      "❌ Cookie 已失效或未检测到登录态（来源: " + resolved.from + "），请在 Safari 重新登录该网站\n" +
+      "[诊断] logout=" + hasLogout + " formhash=" + hasHash + " uid=" + hasUid + " cookieLen=" + cookie.length
     );
   }
 
