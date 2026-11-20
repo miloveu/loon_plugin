@@ -3,15 +3,34 @@
 //   - 站点2: www.clxp.net.cn (死性不改BBS)
 //
 // 同一份代码被插件以两种身份调用：
-//   1) http-request 身份：Safari 登录论坛时抓取 Cookie（此时 $request 存在）
+//   1) http-request 身份：Safari 登录论坛时抓取 Cookie（此时 $request 存在），存入 $persistentStore
 //   2) cron 身份：每天定时登录论坛、领每日任务奖励（此时 $request 不存在）
+//
+// cron 身份的 Cookie 来源优先级：
+//   1) 仓库 cookie_583go.txt / cookie_clxp.txt（可选，没上传就跳过）
+//   2) http-request 抓取存入的 $persistentStore
 
 const UA =
   "Mozilla/5.0 (iPhone; CPU iPhone OS 17_6 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.6 Mobile/15E148 Safari/604.1";
 
+const REPO_RAW = "https://raw.githubusercontent.com/miloveu/loon_plugin/main/";
+const REPO_CDN = "https://cdn.jsdelivr.net/gh/miloveu/loon_plugin@main/";
+
 const SITES = [
-  { name: "网吧三国", key: "583go", host: "583go.com", home: "http://www.583go.com/forum.php" },
-  { name: "死性不改BBS", key: "clxp", host: "clxp.net.cn", home: "https://www.clxp.net.cn/forum.php" },
+  {
+    name: "网吧三国",
+    key: "583go",
+    host: "583go.com",
+    home: "http://www.583go.com/forum.php",
+    cookieFiles: [REPO_RAW + "cookie_583go.txt", REPO_CDN + "cookie_583go.txt"],
+  },
+  {
+    name: "死性不改BBS",
+    key: "clxp",
+    host: "clxp.net.cn",
+    home: "https://www.clxp.net.cn/forum.php",
+    cookieFiles: [REPO_RAW + "cookie_clxp.txt", REPO_CDN + "cookie_clxp.txt"],
+  },
 ];
 
 // ─────────────────── Cookie 抓取（http-request 身份） ───────────────────
@@ -21,17 +40,10 @@ function captureCookie() {
   const raw = headers["Cookie"] || headers["cookie"];
   const url = $request.url || "";
 
-  // 调试通知：只要拦截到登录相关请求就提醒（用于排查脚本是否触发、Cookie 是否带登录态）
-  if (/member\.php\?mod=logging/.test(url)) {
-    const ok = !!(raw && /auth=/.test(raw) && /saltkey=/.test(raw));
-    $notification.post(
-      "Loon 调试：已拦截到登录请求",
-      "Cookie 登录态特征: " + (ok ? "✅ 有" : raw ? "❌ 无" : "❌ 请求头无 Cookie"),
-      url
-    );
+  if (!raw) {
+    console.log("请求头无 Cookie @ " + url);
+    return;
   }
-
-  if (!raw) return;
 
   // Discuz 登录态特征：同时包含 auth 和 saltkey
   if (!/auth=/.test(raw) || !/saltkey=/.test(raw)) {
@@ -64,6 +76,10 @@ function httpGet(url, cookie) {
   });
 }
 
+function isLoginCookie(s) {
+  return /auth=/.test(s) && /saltkey=/.test(s);
+}
+
 function uniq(arr) {
   const seen = {};
   return arr.filter(function (x) {
@@ -73,11 +89,29 @@ function uniq(arr) {
   });
 }
 
-async function doSite(site) {
-  const cookie = $persistentStore.read(site.key + "_cookie");
-  if (!cookie) {
-    return "❌ 没有登录 Cookie，请先用 Safari 登录一次该网站（保持 Loon 开启）";
+// Cookie 来源：仓库文件（可选）→ 抓取缓存
+async function resolveCookie(site) {
+  // 1. 仓库 cookie 文件（没有上传过会 404，静默跳过）
+  for (const url of site.cookieFiles) {
+    try {
+      const raw = (await httpGet(url, "")).trim();
+      if (raw && isLoginCookie(raw)) return { cookie: raw, from: "仓库文件" };
+    } catch (e) {
+      console.log("读取仓库 Cookie 文件跳过: " + e.message);
+    }
   }
+  // 2. http-request 抓取存入的缓存
+  const stored = $persistentStore.read(site.key + "_cookie");
+  if (stored && isLoginCookie(stored)) return { cookie: stored, from: "抓取缓存" };
+  return null;
+}
+
+async function doSite(site) {
+  const resolved = await resolveCookie(site);
+  if (!resolved) {
+    return "❌ 没有 Cookie。请用 Safari 登录一次该网站（保持 Loon 开启），或在仓库上传 cookie 文件";
+  }
+  const cookie = resolved.cookie;
 
   // 1. 访问论坛首页 —— 相当于每天登录一次
   const homeBody = await httpGet(site.home, cookie);
@@ -87,12 +121,12 @@ async function doSite(site) {
     /mod=logging&action=logout/.test(homeBody) ||
     (/formhash=/.test(homeBody) && /space-uid-\d+/.test(homeBody));
   if (!loggedIn) {
-    return "❌ Cookie 已失效，请在 Safari 重新登录该网站";
+    return "❌ Cookie 已失效（来源: " + resolved.from + "），请在 Safari 重新登录该网站";
   }
 
   const hashMatch = homeBody.match(/formhash=([a-zA-Z0-9]+)/);
   const formhash = hashMatch ? hashMatch[1] : "";
-  const lines = ["✅ 每日登录成功"];
+  const lines = ["✅ 每日登录成功（Cookie 来源: " + resolved.from + "）"];
 
   try {
     // 2. 查看任务页面，找到可领取的每日任务
@@ -141,7 +175,7 @@ async function doSite(site) {
   return lines.join("\n");
 }
 
-async function runCheckin() {
+async function main() {
   const results = [];
   for (const site of SITES) {
     try {
@@ -154,15 +188,14 @@ async function runCheckin() {
   const dateStr = now.getFullYear() + "-" + (now.getMonth() + 1) + "-" + now.getDate();
   $notification.post("每日登录领积分 " + dateStr, "", results.join("\n\n"));
   console.log(results.join("\n"));
+  $done();
 }
 
 // ─────────────────── 入口：按调用身份分发 ───────────────────
 
-(async function main() {
-  if (typeof $request === "undefined" || $request === null) {
-    await runCheckin(); // cron 身份
-  } else {
-    captureCookie();    // http-request 身份
-  }
+if (typeof $request === "undefined" || $request === null) {
+  main();      // cron 身份
+} else {
+  captureCookie();  // http-request 身份
   $done();
-})();
+}
