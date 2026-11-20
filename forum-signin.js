@@ -1,0 +1,157 @@
+// Loon 插件脚本（二合一）—— 论坛每日登录领积分
+//   - 站点1: www.583go.com   (网吧三国)
+//   - 站点2: www.clxp.net.cn (死性不改BBS)
+//
+// 同一份代码被插件以两种身份调用：
+//   1) http-request 身份：Safari 登录论坛时抓取 Cookie（此时 $request 存在）
+//   2) cron 身份：每天定时登录论坛、领每日任务奖励（此时 $request 不存在）
+
+const UA =
+  "Mozilla/5.0 (iPhone; CPU iPhone OS 17_6 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.6 Mobile/15E148 Safari/604.1";
+
+const SITES = [
+  { name: "网吧三国", key: "583go", host: "583go.com", home: "http://www.583go.com/forum.php" },
+  { name: "死性不改BBS", key: "clxp", host: "clxp.net.cn", home: "https://www.clxp.net.cn/forum.php" },
+];
+
+// ─────────────────── Cookie 抓取（http-request 身份） ───────────────────
+
+function captureCookie() {
+  const headers = $request.headers || {};
+  const raw = headers["Cookie"] || headers["cookie"];
+  if (!raw) return;
+
+  // Discuz 登录态特征：同时包含 auth 和 saltkey
+  if (!/auth=/.test(raw) || !/saltkey=/.test(raw)) {
+    console.log("Cookie 无登录态特征，跳过保存");
+    return;
+  }
+  const url = $request.url || "";
+  const site = SITES.find(function (s) { return url.indexOf(s.host) !== -1; });
+  if (!site) return;
+
+  const storeKey = site.key + "_cookie";
+  const old = $persistentStore.read(storeKey);
+  if (old !== raw) {
+    $persistentStore.write(raw, storeKey);
+    $notification.post(site.name + " Cookie 已保存", "", "登录态已更新，每日登录脚本可正常使用");
+  }
+  console.log(site.name + " Cookie 已捕获");
+}
+
+// ─────────────────── 每日登录领积分（cron 身份） ───────────────────
+
+function httpGet(url, cookie) {
+  return new Promise(function (resolve, reject) {
+    $httpClient.get(
+      { url: url, headers: { "User-Agent": UA, Cookie: cookie || "" } },
+      function (status, response, body) {
+        if (status && status >= 200 && status < 400) resolve(body || "");
+        else reject(new Error("HTTP " + status + " @ " + url));
+      }
+    );
+  });
+}
+
+function uniq(arr) {
+  const seen = {};
+  return arr.filter(function (x) {
+    if (seen[x]) return false;
+    seen[x] = 1;
+    return true;
+  });
+}
+
+async function doSite(site) {
+  const cookie = $persistentStore.read(site.key + "_cookie");
+  if (!cookie) {
+    return "❌ 没有登录 Cookie，请先用 Safari 登录一次该网站（保持 Loon 开启）";
+  }
+
+  // 1. 访问论坛首页 —— 相当于每天登录一次
+  const homeBody = await httpGet(site.home, cookie);
+
+  // Discuz 登录态特征：页面上存在退出登录链接
+  const loggedIn =
+    /mod=logging&action=logout/.test(homeBody) ||
+    (/formhash=/.test(homeBody) && /space-uid-\d+/.test(homeBody));
+  if (!loggedIn) {
+    return "❌ Cookie 已失效，请在 Safari 重新登录该网站";
+  }
+
+  const hashMatch = homeBody.match(/formhash=([a-zA-Z0-9]+)/);
+  const formhash = hashMatch ? hashMatch[1] : "";
+  const lines = ["✅ 每日登录成功"];
+
+  try {
+    // 2. 查看任务页面，找到可领取的每日任务
+    const taskBase = site.home.replace(/forum\.php.*$/, "");
+    const taskBody = await httpGet(taskBase + "home.php?mod=task", cookie);
+    const ids = uniq((taskBody.match(/do=apply&id=(\d+)/g) || []).map(function (s) {
+      return s.match(/id=(\d+)/)[1];
+    }));
+
+    if (ids.length === 0) lines.push("今日暂无可领取的任务");
+
+    // 3. 逐个申请任务并尝试领取奖励
+    for (const id of ids) {
+      let applyBody = "";
+      try {
+        applyBody = await httpGet(
+          taskBase + "home.php?mod=task&do=apply&id=" + id + (formhash ? "&formhash=" + formhash : ""),
+          cookie
+        );
+      } catch (e) {
+        lines.push("任务#" + id + " 申请失败: " + e.message);
+        continue;
+      }
+
+      // 申请后如果出现"领取奖励"链接（do=draw），则继续领取
+      if (/do=draw/.test(applyBody)) {
+        try {
+          const drawBody = await httpGet(
+            taskBase + "home.php?mod=task&do=draw&id=" + id + (formhash ? "&formhash=" + formhash : ""),
+            cookie
+          );
+          const m = drawBody.match(/<div class="c">\s*([\s\S]*?)\s*<\/div>/);
+          const msg = m ? m[1].replace(/<[^>]+>/g, "").trim() : "";
+          lines.push("任务#" + id + ": " + (msg || "已领取"));
+        } catch (e) {
+          lines.push("任务#" + id + " 领取失败: " + e.message);
+        }
+      } else {
+        const okMsg = applyBody.match(/(获得了|奖励|成功)[^<]{0,30}/);
+        lines.push("任务#" + id + ": " + (okMsg ? okMsg[0].trim() : "已申请"));
+      }
+    }
+  } catch (e) {
+    lines.push("（任务页处理异常: " + e.message + "）");
+  }
+  return lines.join("\n");
+}
+
+async function runCheckin() {
+  const results = [];
+  for (const site of SITES) {
+    try {
+      results.push("【" + site.name + "】\n" + (await doSite(site)));
+    } catch (e) {
+      results.push("【" + site.name + "】\n❌ 执行异常: " + e.message);
+    }
+  }
+  const now = new Date();
+  const dateStr = now.getFullYear() + "-" + (now.getMonth() + 1) + "-" + now.getDate();
+  $notification.post("每日登录领积分 " + dateStr, "", results.join("\n\n"));
+  console.log(results.join("\n"));
+}
+
+// ─────────────────── 入口：按调用身份分发 ───────────────────
+
+(async function main() {
+  if (typeof $request === "undefined" || $request === null) {
+    await runCheckin(); // cron 身份
+  } else {
+    captureCookie();    // http-request 身份
+  }
+  $done();
+})();
