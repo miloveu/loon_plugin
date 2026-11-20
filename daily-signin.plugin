@@ -2,11 +2,11 @@
 #!desc = Safari 登录论坛时自动抓取 Cookie；每天定时用 Cookie 登录论坛、领取每日任务（天天打卡）奖励并通知。Cookie 失效会提醒重新登录。一份脚本双入口：http-request 抓 Cookie，cron 每日签到。
 #!author = WorkBuddy
 
-# 脚本地址走 jsDelivr CDN；脚本内容见仓库 forum-signin.js
+# Loon 官方脚本语法：http-request <URL正则> script-path=...,tag=...,enable=true
 [Script]
-http-request ^https?:\/\/(www\.)?583go\.com script-path=https://cdn.jsdelivr.net/gh/miloveu/loon_plugin@main/forum-signin.js,tag=583go-Cookie,requires-body=false,timeout=10,enable=true
-http-request ^https?:\/\/(www\.)?clxp\.net\.cn script-path=https://cdn.jsdelivr.net/gh/miloveu/loon_plugin@main/forum-signin.js,tag=clxp-Cookie,requires-body=false,timeout=10,enable=true
-cron "20 9 * * *" script-path=https://cdn.jsdelivr.net/gh/miloveu/loon_plugin@main/forum-signin.js,tag=每日登录领积分,timeout=120,enable=true
+http-request ^https?:\/\/(www\.)?583go\.com script-path=https://raw.githubusercontent.com/miloveu/loon_plugin/main/forum-signin.js,tag=583go-Cookie,requires-body=false,timeout=10,enable=true
+http-request ^https?:\/\/(www\.)?clxp\.net\.cn script-path=https://raw.githubusercontent.com/miloveu/loon_plugin/main/forum-signin.js,tag=clxp-Cookie,requires-body=false,timeout=10,enable=true
+cron "20 9 * * *" script-path=https://raw.githubusercontent.com/miloveu/loon_plugin/main/forum-signin.js,tag=每日登录领积分,timeout=120,enable=true
 
 # MITM：两个站都要解密（Safari 会把 583go 的 http 自动升级为 https）
 # 前提：Loon → 配置 → 证书 已生成并安装，且 iOS 设置里已完全信任该证书
