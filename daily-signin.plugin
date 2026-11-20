@@ -9,6 +9,9 @@ http-request ^https?:\/\/(www\.)?583go\.com script-path=https://raw.githubuserco
 http-request ^https?:\/\/(www\.)?clxp\.net\.cn script-path=https://raw.githubusercontent.com/miloveu/loon_plugin/main/forum-signin.js?v=3,tag=clxp-Cookie,requires-body=false,timeout=10,enable=true
 cron "20 9 * * *" script-path=https://raw.githubusercontent.com/miloveu/loon_plugin/main/forum-signin.js?v=3,tag=每日登录领积分,timeout=120,enable=true
 
+# 手动运行入口：出现在 Loon 首页「脚本任务」里，可随时点 ▶ 执行一次签到
+generic script-path=https://raw.githubusercontent.com/miloveu/loon_plugin/main/forum-signin.js?v=3,tag=手动签到测试,timeout=120,enable=true
+
 # 分流：两个论坛都是国内站，强制直连，避免走代理节点打不开
 [Rule]
 DOMAIN-SUFFIX,583go.com,DIRECT
