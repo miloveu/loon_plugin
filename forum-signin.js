@@ -77,9 +77,15 @@ function httpGet(url, cookie) {
   return new Promise(function (resolve, reject) {
     $httpClient.get(
       { url: url, headers: { "User-Agent": UA, Cookie: cookie || "" } },
-      function (status, response, body) {
-        if (status && status >= 200 && status < 400) resolve(body || "");
-        else reject(new Error("HTTP " + status + " @ " + url));
+      // Loon/Surge 回调签名：function(error, response, body)，成功时 error 为 null
+      function (error, response, body) {
+        if (error) {
+          reject(new Error(String(error) + " @ " + url));
+        } else if (!body) {
+          reject(new Error("空响应 @ " + url));
+        } else {
+          resolve(body);
+        }
       }
     );
   });
