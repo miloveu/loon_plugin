@@ -1,16 +1,20 @@
 #!name = 论坛每日登录领积分（网吧三国 + 死性不改BBS）
-#!desc = Safari 登录论坛时自动抓取 Cookie；每天定时用 Cookie 登录论坛、领取每日任务（天天打卡）奖励并通知。Cookie 失效会提醒重新登录。一份脚本双入口：http-request 抓 Cookie，cron 每日签到。
+#!desc = Safari 登录论坛时自动抓取 Cookie；每天定时用 Cookie 登录论坛、领取每日任务（天天打卡）奖励并通知。Cookie 失效会提醒重新登录。Cookie 抓取可通过插件参数里的开关关闭。
 #!author = WorkBuddy
+
+# 插件参数：在 Loon → 配置 → 插件 → 点击本插件 → 参数 里显示开关
+[Argument]
+cookie_capture = switch,true,tag=Cookie 抓取开关,desc=两个站的 Cookie 都抓取成功后建议关闭（不再拦截浏览请求）；Cookie 失效需要重新抓取时再打开
 
 # Loon 官方脚本语法：http-request <URL正则> script-path=...,tag=...,enable=true
 # 地址带 ?v=N 版本参数，用于强制 Loon 刷新脚本缓存（每次更新脚本时递增 N）
 [Script]
-http-request ^https?:\/\/(www\.)?583go\.com script-path=https://raw.githubusercontent.com/miloveu/loon_plugin/main/forum-signin.js?v=7,tag=583go-Cookie,requires-body=false,timeout=10,enable=true
-http-request ^https?:\/\/(www\.)?clxp\.net\.cn script-path=https://raw.githubusercontent.com/miloveu/loon_plugin/main/forum-signin.js?v=7,tag=clxp-Cookie,requires-body=false,timeout=10,enable=true
-cron "20 9 * * *" script-path=https://raw.githubusercontent.com/miloveu/loon_plugin/main/forum-signin.js?v=7,tag=每日登录领积分,timeout=120,enable=true
+http-request ^https?:\/\/(www\.)?583go\.com script-path=https://raw.githubusercontent.com/miloveu/loon_plugin/main/forum-signin.js?v=8,tag=583go-Cookie,requires-body=false,timeout=10,enable={cookie_capture}
+http-request ^https?:\/\/(www\.)?clxp\.net\.cn script-path=https://raw.githubusercontent.com/miloveu/loon_plugin/main/forum-signin.js?v=8,tag=clxp-Cookie,requires-body=false,timeout=10,enable={cookie_capture}
+cron "20 9 * * *" script-path=https://raw.githubusercontent.com/miloveu/loon_plugin/main/forum-signin.js?v=8,tag=每日登录领积分,timeout=120,enable=true
 
 # 手动运行入口：出现在 Loon 首页「脚本任务」里，可随时点 ▶ 执行一次签到
-generic script-path=https://raw.githubusercontent.com/miloveu/loon_plugin/main/forum-signin.js?v=7,tag=手动签到测试,timeout=120,enable=true
+generic script-path=https://raw.githubusercontent.com/miloveu/loon_plugin/main/forum-signin.js?v=8,tag=手动签到测试,timeout=120,enable=true
 
 # 分流：两个论坛都是国内站，强制直连，避免走代理节点打不开
 [Rule]
