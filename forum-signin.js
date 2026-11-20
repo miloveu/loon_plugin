@@ -19,14 +19,25 @@ const SITES = [
 function captureCookie() {
   const headers = $request.headers || {};
   const raw = headers["Cookie"] || headers["cookie"];
+  const url = $request.url || "";
+
+  // 调试通知：只要拦截到登录相关请求就提醒（用于排查脚本是否触发、Cookie 是否带登录态）
+  if (/member\.php\?mod=logging/.test(url)) {
+    const ok = !!(raw && /auth=/.test(raw) && /saltkey=/.test(raw));
+    $notification.post(
+      "Loon 调试：已拦截到登录请求",
+      "Cookie 登录态特征: " + (ok ? "✅ 有" : raw ? "❌ 无" : "❌ 请求头无 Cookie"),
+      url
+    );
+  }
+
   if (!raw) return;
 
   // Discuz 登录态特征：同时包含 auth 和 saltkey
   if (!/auth=/.test(raw) || !/saltkey=/.test(raw)) {
-    console.log("Cookie 无登录态特征，跳过保存");
+    console.log("Cookie 无登录态特征，跳过保存 @ " + url);
     return;
   }
-  const url = $request.url || "";
   const site = SITES.find(function (s) { return url.indexOf(s.host) !== -1; });
   if (!site) return;
 
