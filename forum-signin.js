@@ -127,15 +127,19 @@ async function doSite(site) {
     return "❌ 没有 Cookie。请用 Safari 登录一次该网站（保持 Loon 开启），或在仓库上传 cookie 文件";
   }
   const cookie = resolved.cookie;
+  // mobile=no：Discuz 模板切换开关，强制返回电脑版页面（含 formhash/退出登录链接）
+  // 否则脚本用 iPhone UA 会被返回手机版页面，缺少判断登录态所需的元素
+  const reqCookie = cookie + "; mobile=no";
 
   // 1. 访问论坛首页 —— 相当于每天登录一次
-  const homeBody = await httpGet(site.home, cookie);
+  const homeBody = await httpGet(site.home, reqCookie);
 
   // Discuz 登录态特征：页面上存在退出登录链接（兼容手机版模板）
   const hasLogout = /mod=logging&action=logout|logging&action=logout|退出/.test(homeBody);
   const hasHash = /formhash=/.test(homeBody);
   const hasUid = /space-uid-\d+|uid=\d+&|member_center|个人中心/.test(homeBody);
-  const loggedIn = hasLogout || (hasHash && hasUid);
+  const isMobilePage = /手机版|mobile=/.test(homeBody);
+  const loggedIn = hasLogout || (hasHash && hasUid) || (hasUid && isMobilePage);
   if (!loggedIn) {
     // 诊断信息：帮助定位登录态检测问题（确认无误后可删除）
     const strip = homeBody.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ");
@@ -151,13 +155,20 @@ async function doSite(site) {
   }
 
   const hashMatch = homeBody.match(/formhash=([a-zA-Z0-9]+)/);
-  const formhash = hashMatch ? hashMatch[1] : "";
   const lines = ["✅ 每日登录成功（Cookie 来源: " + resolved.from + "）"];
 
   try {
     // 2. 查看任务页面，找到可领取的每日任务
     const taskBase = site.home.replace(/forum\.php.*$/, "");
-    const taskBody = await httpGet(taskBase + "home.php?mod=task", cookie);
+    const taskBody = await httpGet(taskBase + "home.php?mod=task", reqCookie);
+
+    // formhash 兜底：首页没有时从任务页提取
+    let formhash = hashMatch ? hashMatch[1] : "";
+    if (!formhash) {
+      const m2 = taskBody.match(/formhash=([a-zA-Z0-9]+)/);
+      formhash = m2 ? m2[1] : "";
+    }
+
     const ids = uniq((taskBody.match(/do=apply&id=(\d+)/g) || []).map(function (s) {
       return s.match(/id=(\d+)/)[1];
     }));
@@ -170,7 +181,7 @@ async function doSite(site) {
       try {
         applyBody = await httpGet(
           taskBase + "home.php?mod=task&do=apply&id=" + id + (formhash ? "&formhash=" + formhash : ""),
-          cookie
+          reqCookie
         );
       } catch (e) {
         lines.push("任务#" + id + " 申请失败: " + e.message);
@@ -182,7 +193,7 @@ async function doSite(site) {
         try {
           const drawBody = await httpGet(
             taskBase + "home.php?mod=task&do=draw&id=" + id + (formhash ? "&formhash=" + formhash : ""),
-            cookie
+            reqCookie
           );
           const m = drawBody.match(/<div class="c">\s*([\s\S]*?)\s*<\/div>/);
           const msg = m ? m[1].replace(/<[^>]+>/g, "").trim() : "";
