@@ -11,8 +11,10 @@
  *   因此本脚本必须「先解码 → 改字段 → 再编码回去」，否则 App 解析失败。
  *
  * 改写策略：保持 App 原有的响应格式（明文进明文出 / Base64 进 Base64 出），
- *   优先在服务器真实响应上改写字段；解析失败时回退到抓包数据模板。
- *   改写字段：premiumExpiresAt -> 2099-09-09、premiumFeatureEnabled -> true。
+ *   在服务器真实响应上改写字段；解析失败时【原样放行】（绝不返回缺字段的
+ *   模板，否则登录响应缺 token 会导致 App 解码失败）。
+ *   改写字段：premiumExpiresAt -> 2099-09-09、premiumFeatureEnabled -> true、
+ *   trialEndAt -> 2099-09-09 对应的时间戳。
  */
 
 const TARGET_EXPIRY = '2099-09-09';
@@ -163,11 +165,19 @@ function main() {
     }
   }
 
-  // 2. 无响应（手动运行）或解析失败时回退到抓包数据模板，按 App 原格式输出
+  // 2. 解析失败时【原样放行】，绝不返回模板：
+  //    /auth/apple（登录）响应含 token/trialFirstGranted 等必填字段，
+  //    模板里没有这些字段，替换会导致 App 解码失败（「格式不正确」）和 401。
+  //    只有手动运行（无拦截响应、$done 无实际效果）时才用模板做演示。
   if (!json || typeof json !== 'object' || !json.user) {
+    if (hasResponse) {
+      console.log('[黄金形态通会员改写] 响应解析失败，原样放行不修改');
+      $done({ body: raw });
+      return;
+    }
     json = JSON.parse(JSON.stringify(CAPTURED));
     wasBase64 = true; // HAR 证据：App 拿到的就是 Base64
-    if (!hasResponse && typeof $notify !== 'undefined') {
+    if (typeof $notify !== 'undefined') {
       $notify(
         '黄金形态通会员改写',
         '手动运行（无拦截响应）',
