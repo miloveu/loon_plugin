@@ -1,0 +1,34 @@
+#!name=黄金形态通会员改写
+#!desc=本题正式答案（单文件版）：基于抓包文件 643_1795359842680.har 写出的 Loon 插件。抓包第 8 条为 App 调用 GET https://btcapi.meihuagold.com/auth/me 读取会员状态，响应体为 Base64 编码 JSON。本插件用 http-response 脚本把响应改写为 Premium 到期 2099-09-09（与学习实例演示站的「会员重写测试」同一手法），保持 App 原有的 Base64 响应格式。脚本内嵌于本文件，无需外部下载，不会出现 404。
+#!icon=https://img.apuse3c.com/source/www/template/fav.ico
+#!author=miloveu
+#!date=2026-11-23
+#!tag=演示
+# ============================================================
+# 数据来源（抓包分析）
+#   抓包文件：643_1795359842680.har（Loon 导出，41 条请求，App 为黄金形态通）
+#   关键条目：GET https://btcapi.meihuagold.com/auth/me
+#     请求 UA：btc/2 CFNetwork/3896.300.71.2.4 Darwin/27.3.0
+#     响应 200，body 为 Base64(JSON)，解码后含 user.premiumExpiresAt（null）
+#   学习实例：https://loon-rewrite-demo.app.workbuddy.host/?sharecode=3RHY43Q2B7
+#
+# 使用说明
+# 1) 需安装并信任 Loon CA 证书（http-response 脚本依赖 HTTPS 解密）。
+# 2) MITM 仅解密 btcapi.meihuagold.com 一个域名，不影响行情等其他流量。
+# 3) 改动后完全杀死 Loon 与 App 再重开；想还原：在 Loon 里关掉本插件。
+#
+# ★ 结论（本题主旨）：会员数据在服务端下发，本地改包只能"骗过界面"。
+#   真实 App 的付费功能还要经过服务端二次校验，本地改写 /auth/me 通常
+#   无法真正解锁付费功能。
+# ============================================================
+
+[Script]
+# http-response 改写：拦截 App 的会员状态接口。脚本内嵌（javascript: 前缀），
+# 逻辑：探测原响应格式（明文/Base64）-> 改写 premiumExpiresAt/premiumFeatureEnabled
+# -> 按原格式回写（Base64 进 Base64 出）；解析失败回退到抓包数据模板。
+http-response ^https?:\/\/btcapi\.meihuagold\.com\/auth\/me script-path=javascript:var E='2099-09-09';var C='ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';function UE(s){var a=[];for(var i=0;i<s.length;i++){var c=s.charCodeAt(i);if(c>=55296&&c<=56319&&i+1<s.length){var d=s.charCodeAt(i+1);if(d>=56320&&d<=57343){c=65536+((c-55296)<<10)+(d-56320);i++;}}if(c<128){a.push(c);}else if(c<2048){a.push(192|(c>>6));a.push(128|(c&63));}else if(c<65536){a.push(224|(c>>12));a.push(128|((c>>6)&63));a.push(128|(c&63));}else{a.push(240|(c>>18));a.push(128|((c>>12)&63));a.push(128|((c>>6)&63));a.push(128|(c&63));}}return a;}function UD(b){var o='';var i=0;while(i<b.length){var x=b[i];var cp;if(x<128){cp=x;i+=1;}else if(x<224){cp=((x&31)<<6)|(b[i+1]&63);i+=2;}else if(x<240){cp=((x&15)<<12)|((b[i+1]&63)<<6)|(b[i+2]&63);i+=3;}else{cp=((x&7)<<18)|((b[i+1]&63)<<12)|((b[i+2]&63)<<6)|(b[i+3]&63);i+=4;}if(cp>=65536){cp-=65536;o+=String.fromCharCode(55296+(cp>>10));o+=String.fromCharCode(56320+(cp&1023));}else{o+=String.fromCharCode(cp);}}return o;}function BE(s){var b=UE(s);var o='';for(var i=0;i<b.length;i+=3){var b0=b[i];var b1=i+1<b.length?b[i+1]:-1;var b2=i+2<b.length?b[i+2]:-1;o+=C[b0>>2];o+=C[((b0&3)<<4)|(b1>=0?b1>>4:0)];if(b1>=0){o+=C[((b1&15)<<2)|(b2>=0?b2>>6:0)];}else{o+='=';}if(b2>=0){o+=C[b2&63];}else{o+='=';}}return o;}function BD(s){var t=s.replace(/[^A-Za-z0-9+/]/g,'');var L=t.length;var b=[];for(var i=0;i<L;i+=4){var i0=C.indexOf(t[i]);var i1=C.indexOf(t[i+1]);var i2=i+2<L?C.indexOf(t[i+2]):-1;var i3=i+3<L?C.indexOf(t[i+3]):-1;var n=(i0<<18)|(i1<<12)|(i2>=0?(i2<<6):0)|(i3>=0?i3:0);b.push((n>>16)&255);if(i2>=0){b.push((n>>8)&255);}if(i3>=0){b.push(n&255);}}return UD(b);}var r=(($response&&$response.body)||'').trim();var j=null;var w=false;if(r){try{j=JSON.parse(r);}catch(e){try{j=JSON.parse(BD(r));w=true;}catch(e2){}}}if(!j||typeof j!=='object'||!j.user){j=JSON.parse('{"ok":true,"user":{"id":"84a07833-b03c-4cea-8945-c2e095aeb77f","displayId":"BTC0887802","nickname":null,"locale":"zh","createdAt":1795359803,"lastLoginAt":1795359860,"premiumFeatureEnabled":true,"trialEndAt":1791731615,"premiumExpiresAt":null},"pushPrefs":{"symbol":"btc","timeframe":null,"bs":false,"trend":false,"smart":false,"updatedAt":1795359861},"deviceCount":0}');w=true;}j.user.premiumFeatureEnabled=true;j.user.premiumExpiresAt=E;var p=JSON.stringify(j);console.log('[黄金形态通会员改写] fmt='+(w?'base64':'json'));$done({body:w?BE(p):p}), requires-body=true, timeout=60, tag=会员状态改写
+
+[MITM]
+# 仅解密按 URL 匹配所需的最小域名集：
+#   btcapi.meihuagold.com —— /auth/me 响应改写依赖（App 的账号/会员接口域）
+hostname = btcapi.meihuagold.com
