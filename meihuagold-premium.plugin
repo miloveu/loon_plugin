@@ -30,12 +30,13 @@
 #   /auth/me   —— 启动/刷新时读取会员状态
 #   /auth/apple—— Apple 登录响应（App 会把此响应里的 user 对象缓存为会员资料，
 #                 会员界面显示的是这份缓存，因此必须一并改写，界面才会更新）
-# 地址带 ?v=7 版本参数，用于强制 Loon 刷新脚本缓存（更新脚本时递增）
-# v7 关键修复：回写响应时同步替换响应头（去掉 Content-Encoding 压缩标记，
-#   并给出正确 Content-Length）。原响应经 Cloudflare 压缩，Loon 交给脚本的
-#   已是解压正文，若保留原压缩头，App 会把未压缩正文当压缩数据解码，
-#   报「未能读取数据，因为它的格式不正确」——这是之前界面不变和登录报错的根因。
-http-response ^https?:\/\/btcapi\.meihuagold\.com\/auth\/(me|apple) script-path=https://raw.githubusercontent.com/miloveu/loon_plugin/main/meihuagold-premium.js?v=7, requires-body=true, timeout=60, tag=会员状态改写
+# 地址带 ?v=8 版本参数，用于强制 Loon 刷新脚本缓存（更新脚本时递增）
+# v8 关键修复：不再改写 trialEndAt。该字段 App 以 32 位整数解析，而 2099-09-09
+#   的 epoch 4092595200 超出 Int32 上限 2147483647，写入会让 App 解码失败，
+#   表现为登录弹「未能读取数据，因为它的格式不正确」。
+# v7 修复（保留）：回写响应时同步替换响应头，去掉 Cloudflare 的 Content-Encoding
+#   压缩标记并给出正确 Content-Length，避免压缩头与未压缩正文不匹配。
+http-response ^https?:\/\/btcapi\.meihuagold\.com\/auth\/(me|apple) script-path=https://raw.githubusercontent.com/miloveu/loon_plugin/main/meihuagold-premium.js?v=8, requires-body=true, timeout=60, tag=会员状态改写
 
 [MITM]
 # 仅解密按 URL 匹配所需的最小域名集：

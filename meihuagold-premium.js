@@ -195,13 +195,12 @@ function main() {
   }
 
   // 3. 改写会员状态：到期时间 2099-09-09，Premium 特性可用
-  //    trialEndAt 同步改为同一时刻的时间戳（4092595200 = 2099-09-09T00:00:00Z），
-  //    避免界面用已过期的试用时间渲染「已过期」文案
+  //    ★ 不动 trialEndAt：App 用 32 位整数存该时间戳（服务端原值 1791731615 在
+  //      Int32 范围内），而 2099-09-09 的 epoch 是 4092595200 > Int32 上限
+  //      2147483647，写入后 App（Swift JSONDecoder）解码整条响应失败，表现为
+  //      登录报「未能读取数据，因为它的格式不正确」。只改写字符串型到期时间。
   json.user.premiumFeatureEnabled = true;
   json.user.premiumExpiresAt = TARGET_EXPIRY;
-  if ('trialEndAt' in json.user) {
-    json.user.trialEndAt = 4092595200;
-  }
 
   // 4. 按原格式回写：Base64 进 Base64 出，明文进明文出
   const plain = JSON.stringify(json);
