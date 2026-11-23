@@ -1,0 +1,36 @@
+#!name=黄金形态通会员改写
+#!desc=本题正式答案：基于抓包文件 643_1795359842680.har 写出的 Loon 插件。抓包第 8 条为 App 调用 GET https://btcapi.meihuagold.com/auth/me 读取会员状态，响应体为 Base64 编码 JSON。本插件用 http-response 脚本把响应改写为 Premium 到期 2099-09-09（与学习实例演示站 loon-rewrite-demo.app.workbuddy.host 的「会员重写测试」同一手法），并保持 App 原有的 Base64 响应格式。
+#!icon=https://img.apuse3c.com/source/www/template/fav.ico
+#!author=miloveu
+#!date=2026-11-23
+#!tag=演示
+# ============================================================
+# 数据来源（抓包分析）
+#   抓包文件：643_1795359842680.har（Loon 导出，41 条请求，App 为黄金形态通）
+#   关键条目：GET https://btcapi.meihuagold.com/auth/me
+#     请求 UA：btc/2 CFNetwork/3896.300.71.2.4 Darwin/27.3.0
+#     响应 200，body 为 Base64(JSON)，解码后含 user.premiumExpiresAt（null）
+#   学习实例：https://loon-rewrite-demo.app.workbuddy.host/?sharecode=3RHY43Q2B7
+#     演示站页面 fetch /auth/me 并解析 user.premiumExpiresAt，
+#     过期显示红色「已过期」；改写为 2099-09-09 后显示绿色「会员有效」。
+#
+# 安装说明
+# 1) 需安装并信任 Loon CA 证书（http-response 脚本依赖 HTTPS 解密）。
+# 2) MITM 仅解密 btcapi.meihuagold.com 一个域名，不影响行情等其他流量。
+# 3) 改动后完全杀死 Loon 与 App 再重开；想还原：在 Loon 里关掉本插件。
+#
+# ★ 结论（本题主旨）：会员数据在服务端下发，本地改包只能"骗过界面"。
+#   真实 App 的付费功能还要经过服务端二次校验（下单、权益接口、签名等），
+#   本地改写 /auth/me 通常无法真正解锁付费功能。
+# ============================================================
+
+[Script]
+# http-response 改写：拦截 App 的会员状态接口，由 meihuagold-premium.js 完成
+#   解码 Base64 -> 改写 premiumExpiresAt/premiumFeatureEnabled -> 重新编码 Base64
+# 地址带 ?v=1 版本参数，用于强制 Loon 刷新脚本缓存（更新脚本时递增）
+http-response ^https?:\/\/btcapi\.meihuagold\.com\/auth\/me script-path=https://raw.githubusercontent.com/miloveu/loon_plugin/main/meihuagold-premium.js?v=1, requires-body=true, timeout=60, tag=会员状态改写
+
+[MITM]
+# 仅解密按 URL 匹配所需的最小域名集：
+#   btcapi.meihuagold.com —— /auth/me 响应改写依赖（App 的账号/会员接口域）
+hostname = btcapi.meihuagold.com
