@@ -141,7 +141,11 @@ function b64decode(s) {
 /* ---------- 主逻辑 ---------- */
 
 function main() {
-  const raw = (($response && $response.body) || '').trim();
+  // $response 只在 Loon 真实拦截到响应时存在；手动运行（脚本列表点 ▶）时没有，
+  // 必须用 typeof 守卫，否则抛 ReferenceError: Can't find variable: $response
+  const hasResponse =
+    typeof $response !== 'undefined' && $response && typeof $response.body === 'string';
+  const raw = hasResponse ? $response.body.trim() : '';
 
   // 1. 探测原响应格式：先按明文 JSON 试，失败再按 Base64 试
   let json = null;
@@ -159,10 +163,17 @@ function main() {
     }
   }
 
-  // 2. 解析失败（如响应被网关压缩/异常）时回退到抓包数据模板，按 App 原格式输出
+  // 2. 无响应（手动运行）或解析失败时回退到抓包数据模板，按 App 原格式输出
   if (!json || typeof json !== 'object' || !json.user) {
     json = JSON.parse(JSON.stringify(CAPTURED));
     wasBase64 = true; // HAR 证据：App 拿到的就是 Base64
+    if (!hasResponse && typeof $notify !== 'undefined') {
+      $notify(
+        '黄金形态通会员改写',
+        '手动运行（无拦截响应）',
+        '已用抓包数据模板生成改写后的 /auth/me 响应体'
+      );
+    }
   }
 
   // 3. 改写会员状态：到期时间 2099-09-09，Premium 特性可用
