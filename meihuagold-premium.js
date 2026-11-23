@@ -3,21 +3,29 @@
  *
  * 数据来源：抓包文件 643_1795359842680.har（Loon 抓包）第 8 条：
  *   GET https://btcapi.meihuagold.com/auth/me
- *   请求头 UA: btc/2 CFNetwork/...（黄金形态通 App），响应体为 Base64 编码 JSON。
+ *   请求头 UA: btc/2 CFNetwork/...（黄金形态通 App），响应 200 明文 JSON。
+ *   注：Loon 导出 HAR 时会把所有正文统一转成 base64（content.encoding=base64），
+ *   连静态 ad.json 亦然，因此 HAR 里的 base64 只是导出编码，不是服务器真发 base64。
  *
  * 与学习实例（WorkBuddy 演示站）的差异：
- *   演示站默认返回明文 JSON，切到 Base64 模式才编码；
- *   真实 App 的 /auth/me 响应体本身就是 Base64 编码（HAR 证据），
- *   因此本脚本必须「先解码 → 改字段 → 再编码回去」，否则 App 解析失败。
+ *   演示站支持明文 JSON 与 ?fmt=base64 两种格式；
+ *   真实 App 走明文 JSON，但响应经 Cloudflare 压缩，且时间字段全为数字时间戳。
+ *   本脚本兼容这两种正文格式（先按明文解析，失败再按 Base64 解码）。
  *
  * 改写策略：保持 App 原有的响应格式（明文进明文出 / Base64 进 Base64 出），
  *   在服务器真实响应上改写字段；解析失败时【原样放行】（绝不返回缺字段的
  *   模板，否则登录响应缺 token 会导致 App 解码失败）。
- *   改写字段：premiumExpiresAt -> 2099-09-09、premiumFeatureEnabled -> true、
- *   trialEndAt -> 2099-09-09 对应的时间戳。
+ *   改写字段：premiumExpiresAt -> 2099-09-09 对应的时间戳、premiumFeatureEnabled -> true。
+ *
+ * ★ 字段类型（v9 关键结论，抓包实证）：
+ *   本 API 的所有时间字段都是【数字时间戳（epoch 秒）】：
+ *     "createdAt":1795408637, "lastLoginAt":1795410201, "trialEndAt":1791731615
+ *   因此 premiumExpiresAt 也必须是数字，写入字符串 "2099-09-09" 会让 App 的
+ *   JSONDecoder 类型校验失败，报「未能读取数据，因为它的格式不正确」。
+ *   2099-09-09T00:00:00Z = 4092595200（由 PowerShell 计算，勿手写）。
  */
 
-const TARGET_EXPIRY = '2099-09-09';
+const TARGET_EXPIRY_EPOCH = 4092595200; // 2099-09-09T00:00:00Z
 
 // 抓包数据模板（HAR 第 8 条响应体 Base64 解码结果，作为兜底）
 const CAPTURED = {
@@ -200,7 +208,7 @@ function main() {
   //      2147483647，写入后 App（Swift JSONDecoder）解码整条响应失败，表现为
   //      登录报「未能读取数据，因为它的格式不正确」。只改写字符串型到期时间。
   json.user.premiumFeatureEnabled = true;
-  json.user.premiumExpiresAt = TARGET_EXPIRY;
+  json.user.premiumExpiresAt = TARGET_EXPIRY_EPOCH;
 
   // 4. 按原格式回写：Base64 进 Base64 出，明文进明文出
   const plain = JSON.stringify(json);
