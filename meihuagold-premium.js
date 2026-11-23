@@ -172,7 +172,15 @@ function main() {
   if (!json || typeof json !== 'object' || !json.user) {
     if (hasResponse) {
       console.log('[黄金形态通会员改写] 响应解析失败，原样放行不修改');
-      $done({ body: raw });
+      // 原样放行也要修正压缩头（Loon 交来的 body 已解压）
+      $done({
+        status: $response.status,
+        headers: {
+          'Content-Type': 'application/json; charset=utf-8',
+          'Content-Length': String(utf8Encode(raw).length)
+        },
+        body: raw
+      });
       return;
     }
     json = JSON.parse(JSON.stringify(CAPTURED));
@@ -203,8 +211,23 @@ function main() {
     '[黄金形态通会员改写] 已改写 /auth/me，原格式=' + (wasBase64 ? 'base64' : 'json')
   );
 
-  // 5. 只替换响应体（保留原状态码与响应头，最大化兼容 App 的响应处理）
-  $done({ body: body });
+  // 5. 替换响应体【并同步替换响应头】：
+  //    原响应经 Cloudflare 压缩（Content-Encoding: gzip/br），Loon 把解压后的
+  //    正文交给脚本，如果回写时保留原头，App 会把未压缩正文当压缩数据解码，
+  //    报「未能读取数据，因为它的格式不正确」。
+  //    因此必须去掉 Content-Encoding，并给出与新正文一致的 Content-Length。
+  const contentLength = String(
+    wasBase64 ? body.length : utf8Encode(plain).length
+  );
+
+  $done({
+    status: hasResponse ? $response.status : 200,
+    headers: {
+      'Content-Type': 'application/json; charset=utf-8',
+      'Content-Length': contentLength
+    },
+    body: body
+  });
 }
 
 main();
