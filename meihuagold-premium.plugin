@@ -30,8 +30,8 @@
 #   /auth/me   —— 启动/刷新时读取会员状态
 #   /auth/apple—— Apple 登录响应（App 会把此响应里的 user 对象缓存为会员资料，
 #                 会员界面显示的是这份缓存，因此必须一并改写，界面才会更新）
-# 地址带 ?v=4 版本参数，用于强制 Loon 刷新脚本缓存（更新脚本时递增）
-http-response ^https?:\/\/btcapi\.meihuagold\.com\/auth\/(me|apple) script-path=https://raw.githubusercontent.com/miloveu/loon_plugin/main/meihuagold-premium.js?v=4, requires-body=true, timeout=60, tag=会员状态改写
+# 地址带 ?v=5 版本参数，用于强制 Loon 刷新脚本缓存（更新脚本时递增）
+http-response ^https?:\/\/btcapi\.meihuagold\.com\/auth\/(me|apple) script-path=https://raw.githubusercontent.com/miloveu/loon_plugin/main/meihuagold-premium.js?v=5, requires-body=true, timeout=60, tag=会员状态改写
 
 [MITM]
 # 仅解密按 URL 匹配所需的最小域名集：

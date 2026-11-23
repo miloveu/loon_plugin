@@ -177,8 +177,13 @@ function main() {
   }
 
   // 3. 改写会员状态：到期时间 2099-09-09，Premium 特性可用
+  //    trialEndAt 同步改为同一时刻的时间戳（4092595200 = 2099-09-09T00:00:00Z），
+  //    避免界面用已过期的试用时间渲染「已过期」文案
   json.user.premiumFeatureEnabled = true;
   json.user.premiumExpiresAt = TARGET_EXPIRY;
+  if ('trialEndAt' in json.user) {
+    json.user.trialEndAt = 4092595200;
+  }
 
   // 4. 按原格式回写：Base64 进 Base64 出，明文进明文出
   const plain = JSON.stringify(json);
