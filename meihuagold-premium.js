@@ -188,14 +188,8 @@ function main() {
     '[黄金形态通会员改写] 已改写 /auth/me，原格式=' + (wasBase64 ? 'base64' : 'json')
   );
 
-  $done({
-    status: 200,
-    headers: {
-      'Content-Type': 'application/json; charset=utf-8',
-      'Access-Control-Allow-Origin': '*'
-    },
-    body: body
-  });
+  // 5. 只替换响应体（保留原状态码与响应头，最大化兼容 App 的响应处理）
+  $done({ body: body });
 }
 
 main();
