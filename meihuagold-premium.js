@@ -1,33 +1,14 @@
 /**
- * 黄金形态通会员改写 - Loon http-response 重写脚本（本题正式答案）
- *
- * 数据来源：抓包文件 643_1795359842680.har（Loon 抓包）第 8 条：
- *   GET https://btcapi.meihuagold.com/auth/me
- *   请求头 UA: btc/2 CFNetwork/...（黄金形态通 App），响应 200 明文 JSON。
- *   注：Loon 导出 HAR 时会把所有正文统一转成 base64（content.encoding=base64），
- *   连静态 ad.json 亦然，因此 HAR 里的 base64 只是导出编码，不是服务器真发 base64。
- *
- * 与学习实例（WorkBuddy 演示站）的差异：
- *   演示站支持明文 JSON 与 ?fmt=base64 两种格式；
- *   真实 App 走明文 JSON，但响应经 Cloudflare 压缩，且时间字段全为数字时间戳。
- *   本脚本兼容这两种正文格式（先按明文解析，失败再按 Base64 解码）。
- *
- * 改写策略：保持 App 原有的响应格式（明文进明文出 / Base64 进 Base64 出），
- *   在服务器真实响应上改写字段；解析失败时【原样放行】（绝不返回缺字段的
- *   模板，否则登录响应缺 token 会导致 App 解码失败）。
- *   改写字段：premiumExpiresAt -> 2099-09-09 对应的时间戳、premiumFeatureEnabled -> true。
- *
- * ★ 字段类型（v9 关键结论，抓包实证）：
- *   本 API 的所有时间字段都是【数字时间戳（epoch 秒）】：
- *     "createdAt":1795408637, "lastLoginAt":1795410201, "trialEndAt":1791731615
- *   因此 premiumExpiresAt 也必须是数字，写入字符串 "2099-09-09" 会让 App 的
- *   JSONDecoder 类型校验失败，报「未能读取数据，因为它的格式不正确」。
- *   2099-09-09T00:00:00Z = 4092595200（由 PowerShell 计算，勿手写）。
+ * 黄金形态通会员改写 - Loon http-response 脚本
+ * 数据来源：643_1795359842680.har 第 8 条 GET /auth/me（响应为明文 JSON）
+ * 改写：user.premiumExpiresAt / user.premiumFeatureEnabled
  */
 
-const TARGET_EXPIRY_EPOCH = 4092595200; // 2099-09-09T00:00:00Z
+// 2099-09-09T00:00:00Z。该 API 时间字段均为 epoch 秒数字，
+// 写成字符串会让 App 的 JSONDecoder 类型校验失败
+const TARGET_EXPIRY_EPOCH = 4092595200;
 
-// 抓包数据模板（HAR 第 8 条响应体 Base64 解码结果，作为兜底）
+// 抓包数据模板：仅手动运行时使用
 const CAPTURED = {
   ok: true,
   user: {
@@ -52,7 +33,7 @@ const CAPTURED = {
   deviceCount: 0
 };
 
-/* ---------- UTF-8 与 Base64（纯 JS 实现，不依赖运行环境内置函数） ---------- */
+/* ---------- UTF-8 / Base64（不依赖运行环境内置函数） ---------- */
 
 function utf8Encode(str) {
   const out = [];
@@ -151,13 +132,12 @@ function b64decode(s) {
 /* ---------- 主逻辑 ---------- */
 
 function main() {
-  // $response 只在 Loon 真实拦截到响应时存在；手动运行（脚本列表点 ▶）时没有，
-  // 必须用 typeof 守卫，否则抛 ReferenceError: Can't find variable: $response
+  // 手动运行时没有 $response，需守卫
   const hasResponse =
     typeof $response !== 'undefined' && $response && typeof $response.body === 'string';
   const raw = hasResponse ? $response.body.trim() : '';
 
-  // 1. 探测原响应格式：先按明文 JSON 试，失败再按 Base64 试
+  // 先按明文解析，失败再按 Base64
   let json = null;
   let wasBase64 = false;
   if (raw) {
@@ -173,14 +153,10 @@ function main() {
     }
   }
 
-  // 2. 解析失败时【原样放行】，绝不返回模板：
-  //    /auth/apple（登录）响应含 token/trialFirstGranted 等必填字段，
-  //    模板里没有这些字段，替换会导致 App 解码失败（「格式不正确」）和 401。
-  //    只有手动运行（无拦截响应、$done 无实际效果）时才用模板做演示。
+  // 解析失败原样放行：登录响应含 token 等必填字段，替换模板会导致解码失败
   if (!json || typeof json !== 'object' || !json.user) {
     if (hasResponse) {
-      console.log('[黄金形态通会员改写] 响应解析失败，原样放行不修改');
-      // 原样放行也要修正压缩头（Loon 交来的 body 已解压）
+      console.log('[黄金形态通会员改写] 响应解析失败，原样放行');
       $done({
         status: $response.status,
         headers: {
@@ -192,46 +168,33 @@ function main() {
       return;
     }
     json = JSON.parse(JSON.stringify(CAPTURED));
-    wasBase64 = true; // HAR 证据：App 拿到的就是 Base64
+    wasBase64 = false;
     if (typeof $notify !== 'undefined') {
       $notify(
         '黄金形态通会员改写',
         '手动运行（无拦截响应）',
-        '已用抓包数据模板生成改写后的 /auth/me 响应体'
+        '已用抓包数据模板生成改写后的响应体'
       );
     }
   }
 
-  // 3. 改写会员状态：到期时间 2099-09-09，Premium 特性可用
-  //    ★ 不动 trialEndAt：App 用 32 位整数存该时间戳（服务端原值 1791731615 在
-  //      Int32 范围内），而 2099-09-09 的 epoch 是 4092595200 > Int32 上限
-  //      2147483647，写入后 App（Swift JSONDecoder）解码整条响应失败，表现为
-  //      登录报「未能读取数据，因为它的格式不正确」。只改写字符串型到期时间。
   json.user.premiumFeatureEnabled = true;
   json.user.premiumExpiresAt = TARGET_EXPIRY_EPOCH;
 
-  // 4. 按原格式回写：Base64 进 Base64 出，明文进明文出
   const plain = JSON.stringify(json);
   const body = wasBase64 ? b64encode(plain) : plain;
 
   console.log(
-    '[黄金形态通会员改写] 已改写 /auth/me，原格式=' + (wasBase64 ? 'base64' : 'json')
+    '[黄金形态通会员改写] 已改写，原格式=' + (wasBase64 ? 'base64' : 'json')
   );
 
-  // 5. 替换响应体【并同步替换响应头】：
-  //    原响应经 Cloudflare 压缩（Content-Encoding: gzip/br），Loon 把解压后的
-  //    正文交给脚本，如果回写时保留原头，App 会把未压缩正文当压缩数据解码，
-  //    报「未能读取数据，因为它的格式不正确」。
-  //    因此必须去掉 Content-Encoding，并给出与新正文一致的 Content-Length。
-  const contentLength = String(
-    wasBase64 ? body.length : utf8Encode(plain).length
-  );
-
+  // 必须同时替换响应头：原响应经 Cloudflare 压缩，Loon 交来的是解压正文，
+  // 保留 Content-Encoding 会让 App 把明文当压缩数据解码
   $done({
     status: hasResponse ? $response.status : 200,
     headers: {
       'Content-Type': 'application/json; charset=utf-8',
-      'Content-Length': contentLength
+      'Content-Length': String(wasBase64 ? body.length : utf8Encode(plain).length)
     },
     body: body
   });

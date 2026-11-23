@@ -1,45 +1,16 @@
 #!name=黄金形态通会员改写
-#!desc=本题正式答案：基于抓包文件 643_1795359842680.har 写出的 Loon 插件。抓包第 8 条为 App 调用 GET https://btcapi.meihuagold.com/auth/me 读取会员状态，响应体为 Base64 编码 JSON。本插件用 http-response 脚本把响应改写为 Premium 到期 2099-09-09（与学习实例演示站的「会员重写测试」同一手法），并保持 App 原有的 Base64 响应格式。需与 meihuagold-premium.js 一起部署（脚本外置于仓库根目录）。
+#!desc=基于抓包数据（643_1795359842680.har）的 Loon 插件：拦截 btcapi.meihuagold.com 的 /auth/(me|apple)，由脚本把 user.premiumExpiresAt 改写为 2099-09-09。需与 meihuagold-premium.js 一起部署。
 #!icon=https://img.apuse3c.com/source/www/template/fav.ico
 #!author=miloveu
 #!date=2026-11-23
 #!tag=演示
-# ============================================================
-# 数据来源（抓包分析）
-#   抓包文件：643_1795359842680.har（Loon 导出，41 条请求，App 为黄金形态通）
-#   关键条目：GET https://btcapi.meihuagold.com/auth/me
-#     请求 UA：btc/2 CFNetwork/3896.300.71.2.4 Darwin/27.3.0
-#     响应 200，body 为 Base64(JSON)，解码后含 user.premiumExpiresAt（null）
-#   学习实例：https://loon-rewrite-demo.app.workbuddy.host/?sharecode=3RHY43Q2B7
 #
-# 使用说明
-# 1) 需安装并信任 Loon CA 证书（http-response 脚本依赖 HTTPS 解密）。
-# 2) MITM 仅解密 btcapi.meihuagold.com 一个域名，不影响行情等其他流量。
-# 3) 改动后完全杀死 Loon 与 App 再重开；想还原：在 Loon 里关掉本插件。
-#
-# ★ 结论（本题主旨）：会员数据在服务端下发，本地改包只能"骗过界面"。
-#   真实 App 的付费功能还要经过服务端二次校验，本地改写 /auth/me 通常
-#   无法真正解锁付费功能。
-# ============================================================
+# 使用：安装并信任 Loon CA 证书，开启 MITM；改动后杀死 Loon 与 App 再重开。
+# 结论：会员数据由服务端下发，本地改包只影响界面显示，不改变服务端记录。
 
 [Script]
-# http-response 改写：拦截 App 的会员数据接口，由 meihuagold-premium.js 完成：
-#   探测原响应格式（明文/Base64）-> 改写 premiumExpiresAt/premiumFeatureEnabled
-#   -> 按原格式回写（Base64 进 Base64 出）；解析失败时原样放行绝不返回模板。
-# 覆盖两个接口：
-#   /auth/me   —— 启动/刷新时读取会员状态
-#   /auth/apple—— Apple 登录响应（App 会把此响应里的 user 对象缓存为会员资料，
-#                 会员界面显示的是这份缓存，因此必须一并改写，界面才会更新）
-# 地址带 ?v=9 版本参数，用于强制 Loon 刷新脚本缓存（更新脚本时递增）
-# v9 关键修复：premiumExpiresAt 改为【数字时间戳】4092595200（2099-09-09T00:00:00Z）。
-#   实证：该 API 的时间字段全为 epoch 秒（createdAt/lastLoginAt/trialEndAt），
-#   之前写入字符串 "2099-09-09" 会让 App 的 JSONDecoder 类型校验失败，
-#   报「未能读取数据，因为它的格式不正确」——这才是 v3 以来一直报错的真正原因。
-# v8（保留）：不改写 trialEndAt，保持服务端原值。
-# v7（保留）：回写响应时同步替换响应头，去掉 Content-Encoding 压缩标记并给出正确 Content-Length。
+# 覆盖两个接口：/auth/me（读取会员状态）、/auth/apple（登录响应，App 会缓存其中的 user 对象）
 http-response ^https?:\/\/btcapi\.meihuagold\.com\/auth\/(me|apple) script-path=https://raw.githubusercontent.com/miloveu/loon_plugin/main/meihuagold-premium.js?v=9, requires-body=true, timeout=60, tag=会员状态改写
 
 [MITM]
-# 仅解密按 URL 匹配所需的最小域名集：
-#   btcapi.meihuagold.com —— /auth/me 响应改写依赖（App 的账号/会员接口域）
 hostname = btcapi.meihuagold.com
