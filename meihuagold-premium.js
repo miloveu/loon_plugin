@@ -1,7 +1,8 @@
 /**
  * 黄金形态通会员改写 - Loon http-response 脚本
- * 数据来源：643_1795359842680.har 第 8 条 GET /auth/me（响应为明文 JSON）
- * 改写：user.premiumExpiresAt / user.premiumFeatureEnabled
+ * 数据来源：643_1795359842680.har（/auth/me）、650_1795502719888.har（/push-prefs）
+ * 改写：user.premiumExpiresAt / user.premiumFeatureEnabled / pushPrefs 开关
+ *       以及 PUT /push-prefs 的 Premium 403 拦截响应
  */
 
 // 2099-09-09T00:00:00Z。该 API 时间字段均为 epoch 秒数字，
@@ -131,12 +132,53 @@ function b64decode(s) {
 
 /* ---------- 主逻辑 ---------- */
 
-function main() {
-  // 手动运行时没有 $response，需守卫
-  const hasResponse =
-    typeof $response !== 'undefined' && $response && typeof $response.body === 'string';
-  const raw = hasResponse ? $response.body.trim() : '';
+// 响应头必须整体替换：原响应经 Cloudflare 压缩，Loon 交来的是解压正文，
+// 保留 Content-Encoding 会让 App 把明文当压缩数据解码
+function doneWith(status, body) {
+  $done({
+    status: status,
+    headers: {
+      'Content-Type': 'application/json; charset=utf-8',
+      'Content-Length': String(utf8Encode(body).length)
+    },
+    body: body
+  });
+}
 
+// 先按明文解析，失败再按 Base64；都失败返回 null
+function parseBody(raw) {
+  if (!raw) return null;
+  try {
+    return JSON.parse(raw);
+  } catch (e) {}
+  try {
+    return JSON.parse(b64decode(raw));
+  } catch (e2) {
+    return null;
+  }
+}
+
+// PUT /push-prefs：服务器对非 Premium 返回 403 {"ok":false,"error":"Premium required..."}，
+// 改写为 {"ok":true} 让界面开关生效；其余响应原样放行
+function handlePushPrefs(raw, hasResponse, status) {
+  const json = parseBody(raw);
+  if (hasResponse && json && json.ok === false && /premium/i.test(json.error || '')) {
+    console.log('[黄金形态通会员改写] 已放行 push-prefs（Premium 403 -> ok）');
+    doneWith(200, JSON.stringify({ ok: true }));
+    return;
+  }
+  if (hasResponse) {
+    console.log('[黄金形态通会员改写] push-prefs 非拦截响应，原样放行');
+    doneWith(status, raw);
+    return;
+  }
+  if (typeof $notify !== 'undefined') {
+    $notify('黄金形态通会员改写', '手动运行（无拦截响应）', 'push-prefs 分支演示');
+  }
+}
+
+// GET /auth/me、POST /auth/apple：改写会员状态与推送开关
+function handleAuth(raw, hasResponse) {
   // 先按明文解析，失败再按 Base64
   let json = null;
   let wasBase64 = false;
@@ -157,14 +199,7 @@ function main() {
   if (!json || typeof json !== 'object' || !json.user) {
     if (hasResponse) {
       console.log('[黄金形态通会员改写] 响应解析失败，原样放行');
-      $done({
-        status: $response.status,
-        headers: {
-          'Content-Type': 'application/json; charset=utf-8',
-          'Content-Length': String(utf8Encode(raw).length)
-        },
-        body: raw
-      });
+      doneWith($response.status, raw);
       return;
     }
     json = JSON.parse(JSON.stringify(CAPTURED));
@@ -180,6 +215,11 @@ function main() {
 
   json.user.premiumFeatureEnabled = true;
   json.user.premiumExpiresAt = TARGET_EXPIRY_EPOCH;
+  if (json.pushPrefs && typeof json.pushPrefs === 'object') {
+    json.pushPrefs.bs = true;
+    json.pushPrefs.trend = true;
+    json.pushPrefs.smart = true;
+  }
 
   const plain = JSON.stringify(json);
   const body = wasBase64 ? b64encode(plain) : plain;
@@ -188,16 +228,22 @@ function main() {
     '[黄金形态通会员改写] 已改写，原格式=' + (wasBase64 ? 'base64' : 'json')
   );
 
-  // 必须同时替换响应头：原响应经 Cloudflare 压缩，Loon 交来的是解压正文，
-  // 保留 Content-Encoding 会让 App 把明文当压缩数据解码
-  $done({
-    status: hasResponse ? $response.status : 200,
-    headers: {
-      'Content-Type': 'application/json; charset=utf-8',
-      'Content-Length': String(wasBase64 ? body.length : utf8Encode(plain).length)
-    },
-    body: body
-  });
+  doneWith(hasResponse ? $response.status : 200, body);
+}
+
+function main() {
+  const url =
+    typeof $request !== 'undefined' && $request ? $request.url || '' : '';
+  const hasResponse =
+    typeof $response !== 'undefined' && $response && typeof $response.body === 'string';
+  const raw = hasResponse ? $response.body.trim() : '';
+  const status = hasResponse ? $response.status : 200;
+
+  if (/push-prefs/.test(url)) {
+    handlePushPrefs(raw, hasResponse, status);
+  } else {
+    handleAuth(raw, hasResponse);
+  }
 }
 
 main();
