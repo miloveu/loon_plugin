@@ -158,13 +158,17 @@ function parseBody(raw) {
   }
 }
 
-// PUT /push-prefs：服务器对非 Premium 返回 403 {"ok":false,"error":"Premium required..."}，
-// 改写为 200。注意 200 响应模型要求携带完整 pushPrefs 对象（缺键会触发
-// valueNotFound，App 报「数据丢失」），字段形状与 /auth/me 中的 pushPrefs 一致
+// PUT /push-prefs：分三类处理
+// 1) 服务器对非 Premium 的策略写操作返回 403 {"ok":false,"error":"Premium required..."}
+//    -> 伪造成 200 + 完整 pushPrefs（缺键会触发 valueNotFound「数据丢失」）
+// 2) 服务器真实 200（如只改 timeframe 不需要 Premium）：响应里的开关是服务端
+//    真实状态（false），若原样放行，App 会用它刷新界面把开关弹回去 -> 覆写为 true
+// 3) 其余原样放行
 function handlePushPrefs(raw, hasResponse, status) {
-  const json = parseBody(raw);
+  const json = hasResponse ? parseBody(raw) : null;
+
   if (hasResponse && json && json.ok === false && /premium/i.test(json.error || '')) {
-    console.log('[黄金形态通会员改写] 已放行 push-prefs（Premium 403 -> ok）');
+    console.log('[黄金形态通会员改写] push-prefs Premium 403 -> ok:true');
     let req = {};
     try {
       req = JSON.parse($request.body || '{}');
@@ -176,16 +180,26 @@ function handlePushPrefs(raw, hasResponse, status) {
     const prefs = {
       symbol: req && req.symbol ? req.symbol : 'btc',
       timeframe: req && 'timeframe' in req ? req.timeframe : null,
-      bs: req && req.bs === false ? false : true,
-      trend: req && req.trend === false ? false : true,
-      smart: req && req.smart === false ? false : true,
+      bs: true,
+      trend: true,
+      smart: true,
       updatedAt: Math.floor(Date.now() / 1000)
     };
     doneWith(200, JSON.stringify({ ok: true, pushPrefs: prefs }));
     return;
   }
+
+  if (hasResponse && json && json.ok === true && json.pushPrefs) {
+    json.pushPrefs.bs = true;
+    json.pushPrefs.trend = true;
+    json.pushPrefs.smart = true;
+    console.log('[黄金形态通会员改写] push-prefs 真实 200，开关已覆写为 true');
+    doneWith(status, JSON.stringify(json));
+    return;
+  }
+
   if (hasResponse) {
-    console.log('[黄金形态通会员改写] push-prefs 非拦截响应，原样放行');
+    console.log('[黄金形态通会员改写] push-prefs 响应非标准形状，原样放行');
     doneWith(status, raw);
     return;
   }
