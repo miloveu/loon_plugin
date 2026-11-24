@@ -159,12 +159,29 @@ function parseBody(raw) {
 }
 
 // PUT /push-prefs：服务器对非 Premium 返回 403 {"ok":false,"error":"Premium required..."}，
-// 改写为 {"ok":true} 让界面开关生效；其余响应原样放行
+// 改写为 200。注意 200 响应模型要求携带完整 pushPrefs 对象（缺键会触发
+// valueNotFound，App 报「数据丢失」），字段形状与 /auth/me 中的 pushPrefs 一致
 function handlePushPrefs(raw, hasResponse, status) {
   const json = parseBody(raw);
   if (hasResponse && json && json.ok === false && /premium/i.test(json.error || '')) {
     console.log('[黄金形态通会员改写] 已放行 push-prefs（Premium 403 -> ok）');
-    doneWith(200, JSON.stringify({ ok: true }));
+    let req = {};
+    try {
+      req = JSON.parse($request.body || '{}');
+    } catch (e) {
+      try {
+        req = JSON.parse(b64decode($request.body || ''));
+      } catch (e2) {}
+    }
+    const prefs = {
+      symbol: req && req.symbol ? req.symbol : 'btc',
+      timeframe: req && 'timeframe' in req ? req.timeframe : null,
+      bs: req && req.bs === false ? false : true,
+      trend: req && req.trend === false ? false : true,
+      smart: req && req.smart === false ? false : true,
+      updatedAt: Math.floor(Date.now() / 1000)
+    };
+    doneWith(200, JSON.stringify({ ok: true, pushPrefs: prefs }));
     return;
   }
   if (hasResponse) {
