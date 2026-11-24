@@ -20,5 +20,10 @@
 #                 响应按本地状态回写——开哪个才开哪个，关了就是关了
 http-response ^https?:\/\/btcapi\.meihuagold\.com\/(auth\/(me|apple)|push-prefs) script-path=https://raw.githubusercontent.com/miloveu/loon_plugin/main/meihuagold-premium.js?v=13, requires-body=true, timeout=60, tag=会员状态改写
 
+# 本地推送策略：APNs 推送由服务端按其数据库下发，改包无法触发；
+# 改为本地定时（每 5 分钟）轮询官方行情接口，趋势信号变化时发本地通知。
+# 数据真实（api.meihuagold.com 公开行情），不依赖会员状态。
+cron "*/5 * * * *" script-path=https://raw.githubusercontent.com/miloveu/loon_plugin/main/push-strategy-local.js, tag=本地推送策略
+
 [MITM]
 hostname = btcapi.meihuagold.com
