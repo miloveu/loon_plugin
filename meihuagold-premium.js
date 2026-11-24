@@ -158,54 +158,110 @@ function parseBody(raw) {
   }
 }
 
+/* ---------- 本地开关状态（$persistentStore 持久化） ---------- */
+
+// 服务器拒绝策略写操作（Premium 403），但它同时会在响应里回传真实状态 false，
+// 会把界面弹回。因此开关状态以本地记录为准：PUT 请求体写什么，响应就回什么
+const STORE_KEY = 'mg_push_prefs';
+
+function readPrefs() {
+  if (typeof $persistentStore === 'undefined') return null;
+  try {
+    const s = $persistentStore.read(STORE_KEY);
+    if (s) return JSON.parse(s);
+  } catch (e) {}
+  return null;
+}
+
+function writePrefs(p) {
+  if (typeof $persistentStore === 'undefined') return;
+  try {
+    $persistentStore.write(JSON.stringify(p), STORE_KEY);
+  } catch (e) {}
+}
+
+// 从 PUT 请求体合并开关意图到本地状态，返回更新后的 prefs
+function mergeRequestIntoPrefs(req) {
+  const prefs =
+    readPrefs() || { symbol: 'btc', timeframe: null, bs: false, trend: false, smart: false };
+  if (req && typeof req === 'object') {
+    if ('bs' in req) prefs.bs = !!req.bs;
+    if ('trend' in req) prefs.trend = !!req.trend;
+    if ('smart' in req) prefs.smart = !!req.smart;
+    if ('timeframe' in req) prefs.timeframe = req.timeframe;
+    if ('symbol' in req) prefs.symbol = req.symbol;
+    writePrefs(prefs);
+  }
+  return prefs;
+}
+
+function parseRequestBody() {
+  const reqRaw =
+    typeof $request !== 'undefined' && $request ? $request.body || '' : '';
+  if (!reqRaw) return null;
+  try {
+    return JSON.parse(reqRaw);
+  } catch (e) {
+    try {
+      return JSON.parse(b64decode(reqRaw));
+    } catch (e2) {
+      return null;
+    }
+  }
+}
+
 // PUT /push-prefs：分三类处理
-// 1) 服务器对非 Premium 的策略写操作返回 403 {"ok":false,"error":"Premium required..."}
+// 1) 服务器对策略写操作返回 403 {"ok":false,"error":"Premium required..."}
 //    -> 伪造成 200 + 完整 pushPrefs（缺键会触发 valueNotFound「数据丢失」）
-// 2) 服务器真实 200（如只改 timeframe 不需要 Premium）：响应里的开关是服务端
-//    真实状态（false），若原样放行，App 会用它刷新界面把开关弹回去 -> 覆写为 true
+// 2) 服务器真实 200（如只改 timeframe 不需要 Premium）：开关字段以本地状态
+//    覆写（服务器回传的是 false，原样放行会把界面弹回），timeframe/symbol 用服务器值
 // 3) 其余原样放行
 function handlePushPrefs(raw, hasResponse, status) {
   const json = hasResponse ? parseBody(raw) : null;
+  const prefs = mergeRequestIntoPrefs(parseRequestBody());
 
-  if (hasResponse && json && json.ok === false && /premium/i.test(json.error || '')) {
-    console.log('[黄金形态通会员改写] push-prefs Premium 403 -> ok:true');
-    let req = {};
-    try {
-      req = JSON.parse($request.body || '{}');
-    } catch (e) {
-      try {
-        req = JSON.parse(b64decode($request.body || ''));
-      } catch (e2) {}
+  // 无响应（手动运行）：直接按本地状态构造响应演示
+  if (!hasResponse) {
+    if (typeof $notify !== 'undefined') {
+      $notify('黄金形态通会员改写', '手动运行（无拦截响应）', '按本地开关状态生成 push-prefs 响应');
     }
-    const prefs = {
-      symbol: req && req.symbol ? req.symbol : 'btc',
-      timeframe: req && 'timeframe' in req ? req.timeframe : null,
-      bs: true,
-      trend: true,
-      smart: true,
-      updatedAt: Math.floor(Date.now() / 1000)
-    };
-    doneWith(200, JSON.stringify({ ok: true, pushPrefs: prefs }));
+    doneWith(
+      200,
+      JSON.stringify({
+        ok: true,
+        pushPrefs: Object.assign({}, prefs, { updatedAt: Math.floor(Date.now() / 1000) })
+      })
+    );
     return;
   }
 
-  if (hasResponse && json && json.ok === true && json.pushPrefs) {
-    json.pushPrefs.bs = true;
-    json.pushPrefs.trend = true;
-    json.pushPrefs.smart = true;
-    console.log('[黄金形态通会员改写] push-prefs 真实 200，开关已覆写为 true');
+  if (json && json.ok === false && /premium/i.test(json.error || '')) {
+    console.log('[黄金形态通会员改写] push-prefs Premium 403 -> ok:true（本地开关状态）');
+    doneWith(
+      200,
+      JSON.stringify({
+        ok: true,
+        pushPrefs: Object.assign({}, prefs, { updatedAt: Math.floor(Date.now() / 1000) })
+      })
+    );
+    return;
+  }
+
+  if (json && json.ok === true && json.pushPrefs) {
+    // 服务器认可的真实字段（timeframe/symbol）以服务器为准
+    if ('timeframe' in json.pushPrefs) prefs.timeframe = json.pushPrefs.timeframe;
+    if ('symbol' in json.pushPrefs) prefs.symbol = json.pushPrefs.symbol;
+    json.pushPrefs.bs = prefs.bs;
+    json.pushPrefs.trend = prefs.trend;
+    json.pushPrefs.smart = prefs.smart;
+    writePrefs(prefs);
+    console.log('[黄金形态通会员改写] push-prefs 真实 200，开关已同步为本地状态');
     doneWith(status, JSON.stringify(json));
     return;
   }
 
-  if (hasResponse) {
-    console.log('[黄金形态通会员改写] push-prefs 响应非标准形状，原样放行');
-    doneWith(status, raw);
-    return;
-  }
-  if (typeof $notify !== 'undefined') {
-    $notify('黄金形态通会员改写', '手动运行（无拦截响应）', 'push-prefs 分支演示');
-  }
+  console.log('[黄金形态通会员改写] push-prefs 响应非标准形状，原样放行');
+  doneWith(status, raw);
 }
 
 // GET /auth/me、POST /auth/apple：改写会员状态与推送开关
@@ -246,10 +302,15 @@ function handleAuth(raw, hasResponse) {
 
   json.user.premiumFeatureEnabled = true;
   json.user.premiumExpiresAt = TARGET_EXPIRY_EPOCH;
+  // pushPrefs 开关以本地记录的用户意图为准（未记录过则保持服务器原值）
   if (json.pushPrefs && typeof json.pushPrefs === 'object') {
-    json.pushPrefs.bs = true;
-    json.pushPrefs.trend = true;
-    json.pushPrefs.smart = true;
+    const prefs = readPrefs();
+    if (prefs) {
+      json.pushPrefs.bs = prefs.bs;
+      json.pushPrefs.trend = prefs.trend;
+      json.pushPrefs.smart = prefs.smart;
+      if ('timeframe' in prefs) json.pushPrefs.timeframe = prefs.timeframe;
+    }
   }
 
   const plain = JSON.stringify(json);
