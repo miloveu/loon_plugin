@@ -1,4 +1,4 @@
-#!name=黄金形态通会员改写
+#!name=比特形态通会员
 #!desc=基于抓包数据（643/650.har）的 Loon 插件：改写 btcapi.meihuagold.com 的 /auth/(me|apple) 会员状态为 2099-09-09，并放行 PUT /push-prefs 的 Premium 403 拦截。需与 meihuagold-premium.js 一起部署。
 #!icon=https://img.apuse3c.com/source/www/template/fav.ico
 #!author=miloveu
